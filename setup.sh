@@ -22,13 +22,13 @@ echo ""
 
 if command -v ollama &> /dev/null; then
     # Try E4B (4B params) first, then E2B (2B) for lower-RAM machines
-    if ollama pull gemma4:4b-it 2>/dev/null; then
-        echo "      Pulled: gemma4:4b-it"
-    elif ollama pull gemma4:2b-it 2>/dev/null; then
-        echo "      Pulled: gemma4:2b-it (lighter variant)"
+    if ollama pull gemma4:e4b 2>/dev/null; then
+        echo "      Pulled: gemma4:e4b"
+    elif ollama pull gemma4:e2b 2>/dev/null; then
+        echo "      Pulled: gemma4:e2b (lighter variant, targets <8 GB RAM)"
     else
         echo "      WARNING: Could not pull Gemma 4 via Ollama."
-        echo "      Try manually: ollama pull gemma4:4b-it"
+        echo "      Try manually: ollama pull gemma4:e4b"
         echo "      Or use the HuggingFace fallback (see src/config.py)."
     fi
 else

@@ -27,6 +27,7 @@ from PIL import Image
 from src.config import (
     HF_MODEL_NAME,
     IMAGE_SIZE,
+    MAX_IMAGE_SIZE_MB,
     MODEL_NAME,
     OFFLINE_MODE,
     OLLAMA_HOST,
@@ -150,10 +151,32 @@ class DermatologyWorker:
             self.use_ollama = False
 
     def _init_hf_pipeline(self):
-        """Load Gemma 4 multimodal pipeline via HuggingFace transformers."""
+        """Load Gemma 4 multimodal pipeline via HuggingFace transformers.
+
+        NOTE: The E4B variant requires ~12-16 GB RAM on CPU (float32). Use
+        Ollama (gemma4:e4b) for lower memory usage via 4-bit quantisation.
+        AutoModelForImageTextToText covers Gemma 4's any-to-any architecture;
+        if the model variant only loads via AutoModelForCausalLM, an error
+        will surface here — switch to Ollama as the primary backend instead.
+        """
         try:
             import torch
-            from transformers import AutoModelForImageTextToText, AutoProcessor
+            from transformers import AutoProcessor
+
+            # AutoModelForImageTextToText is the correct class for Gemma 4's
+            # any-to-any architecture (transformers >= 4.50). Fall back to
+            # AutoModelForCausalLM for older installs, but Ollama is strongly
+            # preferred — HF CPU inference for E4B needs ~12-16 GB RAM.
+            try:
+                from transformers import AutoModelForImageTextToText
+                _ModelClass = AutoModelForImageTextToText
+            except ImportError:
+                from transformers import AutoModelForCausalLM
+                _ModelClass = AutoModelForCausalLM
+                logger.warning(
+                    "AutoModelForImageTextToText unavailable; using AutoModelForCausalLM. "
+                    "Upgrade transformers>=4.50 or switch to Ollama backend."
+                )
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
@@ -162,7 +185,7 @@ class DermatologyWorker:
             self._processor = AutoProcessor.from_pretrained(
                 HF_MODEL_NAME, local_files_only=OFFLINE_MODE
             )
-            self._model = AutoModelForImageTextToText.from_pretrained(
+            self._model = _ModelClass.from_pretrained(
                 HF_MODEL_NAME,
                 torch_dtype=dtype,
                 device_map=device,
@@ -200,6 +223,17 @@ class DermatologyWorker:
 
         if image is None:
             return self._no_image_response(symptoms)
+
+        # Reject images that exceed the configured size limit before any processing.
+        # Use raw pixel byte estimate (width * height * channels) — no encode needed,
+        # and deliberately conservative: real compressed files are always smaller.
+        size_mb = (image.width * image.height * len(image.getbands())) / (1024 * 1024)
+        if size_mb > MAX_IMAGE_SIZE_MB:
+            logger.warning("Image too large (%.1f MB > %d MB limit)", size_mb, MAX_IMAGE_SIZE_MB)
+            return self._error_response(
+                f"Image is too large ({size_mb:.1f} MB). "
+                f"Please use an image under {MAX_IMAGE_SIZE_MB} MB."
+            )
 
         processed = self._preprocess_image(image)
 

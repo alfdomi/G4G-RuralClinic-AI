@@ -13,7 +13,9 @@ from pathlib import Path
 
 # ─── Model Configuration ─────────────────────────────────────────────────────
 # Gemma 4 E4B instruction-tuned variant via Ollama (CPU-friendly, ~4B params)
-MODEL_NAME = "gemma4:4b-it"
+# Pull command: ollama pull gemma4:e4b
+# Low-end hardware alternative: ollama pull gemma4:e2b
+MODEL_NAME = "gemma4:e4b"
 HF_MODEL_NAME = "google/gemma-4-e4b-it"   # HuggingFace fallback (image-text-to-text)
 
 # ─── Offline Mode ─────────────────────────────────────────────────────────────

@@ -132,10 +132,23 @@ class Orchestrator:
             self._init_hf_pipeline()
 
     def _init_hf_pipeline(self):
-        """Load Gemma 4 via HuggingFace transformers (image-text-to-text pipeline)."""
+        """Load Gemma 4 via HuggingFace transformers (Ollama is strongly preferred)."""
         try:
             import torch
-            from transformers import AutoModelForImageTextToText, AutoProcessor
+            from transformers import AutoProcessor
+
+            # AutoModelForImageTextToText is correct for Gemma 4 >= transformers 4.50.
+            # Fall back to AutoModelForCausalLM on older installs with a loud warning.
+            try:
+                from transformers import AutoModelForImageTextToText
+                _ModelClass = AutoModelForImageTextToText
+            except ImportError:
+                from transformers import AutoModelForCausalLM
+                _ModelClass = AutoModelForCausalLM
+                logger.warning(
+                    "AutoModelForImageTextToText unavailable; using AutoModelForCausalLM. "
+                    "Upgrade transformers>=4.50 or switch to Ollama backend."
+                )
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
@@ -144,7 +157,7 @@ class Orchestrator:
             self._processor = AutoProcessor.from_pretrained(
                 HF_MODEL_NAME, local_files_only=OFFLINE_MODE
             )
-            self._model = AutoModelForImageTextToText.from_pretrained(
+            self._model = _ModelClass.from_pretrained(
                 HF_MODEL_NAME,
                 torch_dtype=dtype,
                 device_map=device,
