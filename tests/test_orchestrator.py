@@ -35,26 +35,27 @@ def dummy_image():
 @pytest.fixture
 def mock_orchestrator():
     """
-    Orchestrator with the Ollama backend mocked so no local server is needed.
-    The chat() mock returns a valid JSON dermatology response.
+    Orchestrator with all Ollama backends mocked so no local server is needed.
+    The chat() mock returns a general (no-tool-call) response by default.
     """
     with patch("src.orchestrator.core.Orchestrator._init_ollama"):
         with patch("src.workers.dermatology.DermatologyWorker._init_ollama"):
-            from src.orchestrator.core import Orchestrator
+            with patch("src.workers.rag_worker.RAGWorker._init_ollama"):
+                from src.orchestrator.core import Orchestrator
 
-            orch = Orchestrator(use_ollama=True)
-            orch._client = MagicMock()
+                orch = Orchestrator(use_ollama=True)
+                orch._client = MagicMock()
 
-            # Default: model returns no tool call → general response
-            general_resp = MagicMock()
-            general_resp.message.content = (
-                "That is a good question about skin health. "
-                "Please consult a dermatologist for proper evaluation."
-            )
-            general_resp.message.tool_calls = None
-            orch._client.chat.return_value = general_resp
+                # Default: model returns no tool call → general response
+                general_resp = MagicMock()
+                general_resp.message.content = (
+                    "That is a good question about skin health. "
+                    "Please consult a dermatologist for proper evaluation."
+                )
+                general_resp.message.tool_calls = None
+                orch._client.chat.return_value = general_resp
 
-            return orch
+                return orch
 
 
 def _worker_result_fixture():

@@ -56,3 +56,7 @@ OLLAMA_TIMEOUT: int = 120   # CPU inference with an image takes time
 
 # ─── Conversation Memory ──────────────────────────────────────────────────────
 MAX_HISTORY_LENGTH: int = 10   # Max user/assistant turns retained in memory
+
+# ─── RAG (Retrieval-Augmented Generation) ─────────────────────────────────────
+RAG_TOP_K: int = 3             # Knowledge chunks returned per query
+RAG_KNOWLEDGE_BASE_PATH = ROOT_DIR / "src" / "rag" / "knowledge_base.json"

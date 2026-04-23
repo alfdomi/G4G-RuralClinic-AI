@@ -4,26 +4,23 @@ Core orchestrator for G4G RuralClinic AI.
 Responsibilities:
   1. Load Gemma 4 (via Ollama or HuggingFace pipeline).
   2. Use Gemma 4's native function-calling API to decide which specialist
-     worker to invoke for a given query + image.
-  3. Dispatch to the chosen worker and collect structured results.
+     worker(s) to invoke for a given query + image.
+  3. Dispatch to the chosen workers and collect structured results.
   4. Synthesise a final plain-language response with safety guardrails.
   5. Maintain conversation history and produce a traceable function-call log.
 
-Function-calling flow:
-  User query + image
-      → Gemma 4 decides: call `analyze_skin_lesion`?
-          → DermatologyWorker.analyze(image, symptoms)
-              → Structured JSON result
-                  → Gemma 4 synthesises plain-language response
-                      → Safety enforcement + disclaimer
-                          → Final output dict
+Full routing priority:
+  Image present  → always analyze_skin_lesion; also retrieve_dermatology_knowledge
+                   if the query looks like a knowledge question.
+  Text only      → Gemma 4 native tool calling (returns 0–2 tools).
+  Fallback       → keyword routing (analyze) or knowledge-query heuristic (RAG).
 
 Project: G4G RuralClinic AI — offline frontier AI for accessible
 dermatology screening in rural and underserved communities.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from PIL import Image
@@ -39,6 +36,7 @@ from src.config import (
 from src.tools import TOOL_SCHEMAS
 from src.utils.safety import enforce_safety
 from src.workers.dermatology import DermatologyWorker
+from src.workers.rag_worker import RAGWorker
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +48,10 @@ ABSOLUTE RULES — never break these:
 1. You are NOT a doctor. Never make a definitive medical diagnosis.
 2. Always recommend consulting a qualified dermatologist or healthcare professional.
 3. When the user provides a skin image OR describes a skin symptom, call the `analyze_skin_lesion` tool.
-4. Explain findings in plain language — avoid jargon.
-5. Be empathetic, supportive, and honest about uncertainty.
-6. If you are unsure, say so clearly."""
+4. When the user asks a knowledge question about skin conditions, call `retrieve_dermatology_knowledge`.
+5. Explain findings in plain language — avoid jargon.
+6. Be empathetic, supportive, and honest about uncertainty.
+7. If you are unsure, say so clearly."""
 
 # ─── Synthesis prompt ─────────────────────────────────────────────────────────
 _SYNTHESIS_PROMPT_TEMPLATE = """The user asked: "{query}"
@@ -65,17 +64,24 @@ A specialist AI analysis produced this structured result:
   ABCDE notes    : {abcde_notes}
   Explanation    : {plain_explanation}
   Recommended    : {recommended_action}
-
+{rag_section}
 Write a compassionate, plain-language summary for the user (under 180 words).
 Emphasise that this is NOT a diagnosis and they MUST consult a dermatologist.
 Start with what was found, then what it might mean, then what to do next."""
+
+# Question-like prefixes used for knowledge-query heuristic
+_QUESTION_STARTS = (
+    "what", "how", "why", "when", "which", "who",
+    "is ", "are ", "can ", "does ", "should ", "do ",
+    "tell me", "explain", "describe", "what's",
+)
 
 
 class Orchestrator:
     """
     Central coordinator for the RuralClinic AI system.
 
-    Manages Gemma 4 inference, function-call routing, worker dispatch,
+    Manages Gemma 4 inference, multi-tool routing, worker dispatch,
     response synthesis, and conversation history in a single stateful object.
 
     Typical usage::
@@ -86,21 +92,16 @@ class Orchestrator:
     """
 
     def __init__(self, use_ollama: bool = True):
-        """
-        Initialise the orchestrator and load the Gemma 4 backend.
-
-        Args:
-            use_ollama: Prefer Ollama if True; fall back to HF pipeline.
-        """
         self.use_ollama = use_ollama
         self.history: list[dict] = []
         self.function_call_log: list[dict] = []
 
         self.dermatology_worker = DermatologyWorker(use_ollama=use_ollama)
+        self.rag_worker = RAGWorker(use_ollama=use_ollama)
 
-        self._client = None        # Ollama client
-        self._model = None         # HF model
-        self._processor = None     # HF processor
+        self._client = None
+        self._model = None
+        self._processor = None
 
         if use_ollama:
             self._init_ollama()
@@ -116,7 +117,6 @@ class Orchestrator:
     # ── Backend initialisation ────────────────────────────────────────────────
 
     def _init_ollama(self):
-        """Create Ollama client and verify the model is available locally."""
         try:
             import ollama
             self._client = ollama.Client(host=OLLAMA_HOST)
@@ -132,13 +132,10 @@ class Orchestrator:
             self._init_hf_pipeline()
 
     def _init_hf_pipeline(self):
-        """Load Gemma 4 via HuggingFace transformers (Ollama is strongly preferred)."""
         try:
             import torch
             from transformers import AutoProcessor
 
-            # AutoModelForImageTextToText is correct for Gemma 4 >= transformers 4.50.
-            # Fall back to AutoModelForCausalLM on older installs with a loud warning.
             try:
                 from transformers import AutoModelForImageTextToText
                 _ModelClass = AutoModelForImageTextToText
@@ -176,9 +173,8 @@ class Orchestrator:
         self, query: str, image: Optional[Image.Image] = None
     ) -> dict:
         """
-        Primary entry point: route a user query + optional image through
-        Gemma 4 function calling, execute the appropriate worker, and return
-        a synthesised plain-language response.
+        Primary entry point: route a query + optional image through multi-tool
+        dispatch and return a synthesised plain-language response.
 
         Args:
             query: User's text question or symptom description.
@@ -186,35 +182,41 @@ class Orchestrator:
 
         Returns:
             dict with keys:
-              response        (str)  — Final synthesised answer for the user.
-              worker_result   (dict) — Raw structured output from the worker, or None.
-              function_calls  (list) — Audit trail of all tool calls made.
-              disclaimer      (str)  — Medical safety disclaimer.
-              timestamp       (str)  — UTC ISO-8601 timestamp.
-              error           (str)  — Present only if an exception occurred.
+              response        (str)        — Final synthesised answer.
+              worker_result   (dict|None)  — Raw output from DermatologyWorker.
+              rag_result      (dict|None)  — Raw output from RAGWorker.
+              function_calls  (list)       — Audit trail of all tool calls.
+              disclaimer      (str)        — Medical safety disclaimer.
+              timestamp       (str)        — UTC ISO-8601 timestamp.
+              error           (str)        — Present only if an exception occurred.
         """
-        timestamp = datetime.utcnow().isoformat()
-        logger.info(
-            "route_and_run | has_image=%s | query=%.80s", image is not None, query
-        )
+        timestamp = datetime.now(timezone.utc).isoformat()
+        logger.info("route_and_run | has_image=%s | query=%.80s", image is not None, query)
         self.function_call_log.clear()
 
         try:
-            # Step 1: Ask Gemma 4 whether a tool call is needed
-            tool_call = self._decide_tool_call(query, image)
+            tool_calls = self._decide_tool_calls(query, image)
 
-            # Step 2: Execute the worker if a tool was selected
-            worker_result = None
-            if tool_call:
-                worker_result = self._dispatch_tool(tool_call, image)
-                self._log_function_call(
-                    tool_call["name"],
-                    tool_call.get("arguments", {}),
-                    worker_result,
-                )
+            worker_result: Optional[dict] = None
+            rag_result: Optional[dict] = None
 
-            # Step 3: Synthesise the final response
-            response = self._synthesise_response(query, worker_result)
+            for tc in tool_calls:
+                name = tc["name"]
+                args = tc.get("arguments", {})
+
+                if name == "analyze_skin_lesion":
+                    symptoms = args.get("symptoms", query)
+                    worker_result = self.dermatology_worker.analyze(
+                        image=image, symptoms=symptoms
+                    )
+                    self._log_function_call(name, args, worker_result)
+
+                elif name == "retrieve_dermatology_knowledge":
+                    knowledge_query = args.get("query", query)
+                    rag_result = self.rag_worker.answer(knowledge_query)
+                    self._log_function_call(name, args, rag_result)
+
+            response = self._synthesise_response(query, worker_result, rag_result)
             response = enforce_safety(response)
 
             self._update_history(query, response)
@@ -222,6 +224,7 @@ class Orchestrator:
             return {
                 "response": response,
                 "worker_result": worker_result,
+                "rag_result": rag_result,
                 "function_calls": list(self.function_call_log),
                 "disclaimer": SAFETY_DISCLAIMER,
                 "timestamp": timestamp,
@@ -235,44 +238,46 @@ class Orchestrator:
                     "Please try again, or consult a healthcare professional directly."
                 ),
                 "worker_result": None,
+                "rag_result": None,
                 "function_calls": list(self.function_call_log),
                 "disclaimer": SAFETY_DISCLAIMER,
                 "timestamp": timestamp,
                 "error": str(exc),
             }
 
-    # ── Tool-call decision ────────────────────────────────────────────────────
+    # ── Multi-tool routing ────────────────────────────────────────────────────
 
-    def _decide_tool_call(
+    def _decide_tool_calls(
         self, query: str, image: Optional[Image.Image]
-    ) -> Optional[dict]:
+    ) -> list[dict]:
         """
-        Determine whether a worker tool should be called.
+        Determine which tools to call for this query + image combination.
 
-        Priority order:
-          1. Image present → always route to dermatology worker.
-          2. Ollama available → use Gemma 4 native function calling.
-          3. Fallback → keyword-based routing.
-
-        Returns:
-            dict with 'name' and 'arguments' keys, or None for general queries.
+        Priority:
+          1. Image present → analyze_skin_lesion always.
+             Also add retrieve_dermatology_knowledge if query is question-like.
+          2. No image, Ollama available → let Gemma 4 decide (may return 0–2 tools).
+          3. No image, no Ollama → keyword/heuristic fallback.
         """
         if image is not None:
-            logger.info("Image present — auto-routing to analyze_skin_lesion")
-            return {"name": "analyze_skin_lesion", "arguments": {"symptoms": query}}
+            calls: list[dict] = [
+                {"name": "analyze_skin_lesion", "arguments": {"symptoms": query}}
+            ]
+            if self._is_knowledge_query(query):
+                calls.append(
+                    {"name": "retrieve_dermatology_knowledge", "arguments": {"query": query}}
+                )
+            return calls
 
         if self.use_ollama and self._client:
-            return self._ollama_tool_decision(query)
+            return self._ollama_tool_calls(query)
 
-        return self._keyword_routing(query)
+        return self._keyword_fallback(query)
 
-    def _ollama_tool_decision(self, query: str) -> Optional[dict]:
+    def _ollama_tool_calls(self, query: str) -> list[dict]:
         """
-        Use Ollama's native tool-calling API to let Gemma 4 decide
-        whether to invoke a specialist worker.
-
-        Gemma 4 returns a `tool_calls` block when it selects a tool.
-        Returns None if the model decides no tool is needed.
+        Use Gemma 4 native function calling to select 0, 1, or 2 tools.
+        Falls back to keyword routing if Ollama raises an exception.
         """
         try:
             messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
@@ -285,27 +290,45 @@ class Orchestrator:
                 tools=TOOL_SCHEMAS,
                 options={"temperature": 0.1},
             )
-            if (
-                hasattr(response, "message")
-                and response.message.tool_calls
-            ):
-                tc = response.message.tool_calls[0]
-                logger.info("Gemma 4 selected tool: %s", tc.function.name)
-                return {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments or {},
-                }
+            if hasattr(response, "message") and response.message.tool_calls:
+                calls = []
+                for tc in response.message.tool_calls:
+                    logger.info("Gemma 4 selected tool: %s", tc.function.name)
+                    calls.append({
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments or {},
+                    })
+                return calls
+
             logger.info("Gemma 4 selected no tool — general response")
-            return None
+            return []
 
         except Exception as exc:
-            logger.warning("Ollama tool decision failed (%s) — using keyword routing", exc)
-            return self._keyword_routing(query)
+            logger.warning("Ollama tool decision failed (%s) — keyword fallback", exc)
+            return self._keyword_fallback(query)
+
+    def _keyword_fallback(self, query: str) -> list[dict]:
+        """
+        Heuristic routing used when Ollama is unavailable.
+        Knowledge questions → RAG; symptom descriptions → analysis.
+        """
+        single = self._keyword_routing(query)
+        if single is None:
+            return []
+        # Override to RAG when the matched query is question-like
+        if self._is_knowledge_query(query):
+            return [{"name": "retrieve_dermatology_knowledge", "arguments": {"query": query}}]
+        return [single]
+
+    # ── Legacy single-call routing (kept for backward compatibility) ──────────
 
     def _keyword_routing(self, query: str) -> Optional[dict]:
         """
-        Lightweight fallback routing based on dermatology keyword matching.
-        Used when the model backend is unavailable or returns no tool call.
+        Lightweight keyword-based routing to analyze_skin_lesion.
+        Returns a single tool-call dict, or None for unrelated queries.
+
+        Note: _decide_tool_calls() wraps this and may reroute to RAG for
+        question-like queries. Direct callers (e.g. tests) see the raw result.
         """
         derm_keywords = {
             "skin", "mole", "lesion", "rash", "melanoma", "nevus", "spot",
@@ -318,45 +341,34 @@ class Orchestrator:
             return {"name": "analyze_skin_lesion", "arguments": {"symptoms": query}}
         return None
 
-    # ── Worker dispatch ───────────────────────────────────────────────────────
-
-    def _dispatch_tool(
-        self, tool_call: dict, image: Optional[Image.Image]
-    ) -> dict:
-        """
-        Route a parsed tool-call dict to the appropriate specialist worker.
-
-        Args:
-            tool_call: {'name': str, 'arguments': dict}
-            image: PIL Image if attached to the request.
-
-        Returns:
-            Worker output dict.
-
-        Raises:
-            ValueError: If the tool name is not recognised.
-        """
-        name = tool_call.get("name")
-        args = tool_call.get("arguments", {})
-
-        if name == "analyze_skin_lesion":
-            symptoms = args.get("symptoms", "")
-            return self.dermatology_worker.analyze(image=image, symptoms=symptoms)
-
-        raise ValueError(f"Unknown tool requested by model: '{name}'")
-
     # ── Response synthesis ────────────────────────────────────────────────────
 
     def _synthesise_response(
-        self, query: str, worker_result: Optional[dict]
+        self,
+        query: str,
+        worker_result: Optional[dict],
+        rag_result: Optional[dict] = None,
     ) -> str:
         """
-        Use Gemma 4 to write a compassionate plain-language summary from
-        the worker's structured output, or generate a general response when
-        no worker was invoked.
+        Produce a plain-language response from one or both worker outputs.
+
+        - No workers called → general conversational response.
+        - RAG only → use RAG answer directly.
+        - Analysis (± RAG) → Gemma 4 synthesises from structured result,
+          optionally enriched with retrieved knowledge context.
         """
-        if worker_result is None:
+        if worker_result is None and rag_result is None:
             return self._general_response(query)
+
+        if worker_result is None and rag_result is not None:
+            return rag_result.get("answer", "")
+
+        # worker_result present — build synthesis prompt
+        rag_section = ""
+        if rag_result and rag_result.get("answer"):
+            rag_section = (
+                f"\nAdditional knowledge context:\n  {rag_result['answer']}\n"
+            )
 
         prompt = _SYNTHESIS_PROMPT_TEMPLATE.format(
             query=query,
@@ -367,6 +379,7 @@ class Orchestrator:
             abcde_notes=worker_result.get("abcde_notes", "N/A"),
             plain_explanation=worker_result.get("plain_explanation", "N/A"),
             recommended_action=worker_result.get("recommended_action", "N/A"),
+            rag_section=rag_section,
         )
 
         if self.use_ollama and self._client:
@@ -381,13 +394,11 @@ class Orchestrator:
                 )
                 return resp.message.content
             except Exception as exc:
-                logger.warning("Ollama synthesis failed (%s) — using template", exc)
+                logger.warning("Ollama synthesis failed (%s) — template", exc)
 
-        # Fallback: template-based synthesis without the LLM
         return self._template_synthesis(worker_result)
 
     def _general_response(self, query: str) -> str:
-        """Generate a conversational response for queries that don't need a worker."""
         if self.use_ollama and self._client:
             try:
                 messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
@@ -410,7 +421,6 @@ class Orchestrator:
         )
 
     def _template_synthesis(self, result: dict) -> str:
-        """Build a simple plain-text summary without calling the LLM."""
         cls = result.get("classification", "unclassified").replace("_", " ").title()
         conf = result.get("confidence", "unknown")
         risk = result.get("risk_level", "unknown")
@@ -431,13 +441,18 @@ class Orchestrator:
 
     # ── Utilities ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_knowledge_query(text: str) -> bool:
+        """Heuristic: does this text look like an informational question?"""
+        q = text.lower().strip()
+        return q.endswith("?") or any(q.startswith(s) for s in _QUESTION_STARTS)
+
     def _log_function_call(self, name: str, arguments: dict, result: dict):
-        """Record a tool call in the audit log for UI display and traceability."""
         entry = {
             "tool": name,
             "arguments": arguments,
             "result_keys": list(result.keys()) if result else [],
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         self.function_call_log.append(entry)
         logger.info(
@@ -448,7 +463,6 @@ class Orchestrator:
         )
 
     def _update_history(self, query: str, response: str):
-        """Append this turn to conversation history, trimming if over limit."""
         self.history.append({"role": "user", "content": query})
         self.history.append({"role": "assistant", "content": response})
         max_entries = MAX_HISTORY_LENGTH * 2
@@ -456,6 +470,5 @@ class Orchestrator:
             self.history = self.history[-max_entries:]
 
     def clear_history(self):
-        """Reset conversation history (e.g. when the user clicks 'Clear')."""
         self.history.clear()
         logger.info("Conversation history cleared")

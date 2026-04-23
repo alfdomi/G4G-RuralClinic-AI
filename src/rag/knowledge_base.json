@@ -1,0 +1,226 @@
+[
+  {
+    "id": "gen_abcde",
+    "condition": "general",
+    "title": "The ABCDE Rule for Skin Cancer Detection",
+    "text": "The ABCDE rule is a self-check guide for identifying warning signs of melanoma. A = Asymmetry: one half of the mole or lesion does not match the other. B = Border: edges are irregular, ragged, notched, or blurred. C = Color: uneven color with multiple shades of brown, black, red, white, or blue. D = Diameter: the lesion is larger than 6 mm (about the size of a pencil eraser), though melanomas can be smaller. E = Evolution: any change in size, shape, color, or symptoms such as bleeding, itching, or crusting. Any mole showing one or more of these signs should be evaluated by a dermatologist promptly.",
+    "tags": ["abcde", "mole check", "melanoma detection", "self exam", "warning signs", "skin cancer"]
+  },
+  {
+    "id": "gen_self_exam",
+    "condition": "general",
+    "title": "How to Perform a Skin Self-Examination",
+    "text": "A monthly skin self-examination helps detect new or changing lesions early. In good lighting with a full-length mirror, examine your scalp, face, neck, chest, arms (including underarms), hands, torso, back, buttocks, legs, and feet — including between toes and under nails. Note any new spots, moles that have changed, sores that don't heal, or unusual growths. Ask a partner to help check hard-to-see areas such as your back and scalp. Photograph findings to track changes over time. Report anything new or changing to a dermatologist.",
+    "tags": ["self exam", "skin check", "mole monitoring", "prevention", "inspection"]
+  },
+  {
+    "id": "gen_sun_protection",
+    "condition": "general",
+    "title": "Sun Protection and Skin Cancer Prevention",
+    "text": "UV radiation from the sun and tanning beds is the leading cause of skin cancer. Use broad-spectrum SPF 30+ sunscreen on all exposed skin daily, even on cloudy days, and reapply every 2 hours or after swimming. Seek shade during peak UV hours (10 AM–4 PM). Wear protective clothing, wide-brimmed hats, and UV-blocking sunglasses. Avoid tanning beds — they significantly increase melanoma risk. Fair-skinned individuals, those with many moles, and those with a family history of skin cancer are at higher risk and should be especially vigilant. Annual skin checks with a dermatologist are recommended for high-risk individuals.",
+    "tags": ["sun protection", "SPF", "sunscreen", "UV", "prevention", "tanning"]
+  },
+  {
+    "id": "gen_when_doctor",
+    "condition": "general",
+    "title": "When to See a Dermatologist",
+    "text": "See a dermatologist promptly if you notice: a new mole or spot appearing after age 30; any mole that bleeds, itches, or oozes; a sore that does not heal within 4 weeks; any lesion showing ABCDE warning signs; sudden appearance of many moles; a dark streak under a nail; or any skin change that concerns you. For high-risk individuals, annual full-body skin checks are recommended. Early detection is critical — most skin cancers, including melanoma, are highly treatable when caught early. Do not delay evaluation of a concerning spot.",
+    "tags": ["dermatologist", "when to see doctor", "warning signs", "urgent", "screening", "early detection"]
+  },
+  {
+    "id": "gen_mole_change",
+    "condition": "general",
+    "title": "Changes in Moles: What to Watch For",
+    "text": "Most moles are harmless, but changes in a mole's appearance deserve prompt attention. Warning changes include: rapid growth over weeks; change from flat to raised; darkening or development of multiple colors; new itching, bleeding, or crusting; development of an irregular or notched border; satellite lesions appearing near an existing mole. A mole that stands out from all your other moles — the 'ugly duckling' sign — warrants evaluation even if it doesn't strictly meet ABCDE criteria. Photographs taken monthly are the best way to track subtle changes over time.",
+    "tags": ["mole changes", "growing mole", "changing mole", "ugly duckling", "monitoring", "warning"]
+  },
+  {
+    "id": "mel_overview",
+    "condition": "melanoma",
+    "title": "Melanoma: Overview and Importance of Early Detection",
+    "text": "Melanoma is the most serious type of skin cancer, arising from melanocytes — the cells that produce skin pigment. It accounts for only about 1% of skin cancers but causes the majority of skin cancer deaths due to its tendency to spread to lymph nodes and other organs. Melanoma most commonly develops on the back in men and the legs in women, but can appear anywhere, including areas not exposed to sun. With early detection and surgical treatment, the 5-year survival rate exceeds 98%. Delayed diagnosis significantly worsens outcomes. Any suspicious lesion should be evaluated without delay.",
+    "tags": ["melanoma", "skin cancer", "malignant", "fatal", "melanocytes", "survival", "early detection"]
+  },
+  {
+    "id": "mel_appearance",
+    "condition": "melanoma",
+    "title": "Melanoma: What It Looks Like",
+    "text": "Melanoma typically appears as a mole or dark spot with irregular features: asymmetry, poorly defined or notched borders, multiple colors (black, dark brown, red, white, or blue), and diameter greater than 6 mm. Nodular melanoma presents as a rapidly growing raised firm bump — often pink, red, or black — and may bleed easily. Amelanotic melanoma lacks pigment and may appear pink or skin-colored, making it harder to recognize. Not all melanomas follow the classic dark-spot pattern. Any new, evolving, or unusually appearing skin lesion warrants evaluation by a dermatologist.",
+    "tags": ["melanoma", "appearance", "asymmetric", "dark spot", "irregular borders", "multicolored", "nodular"]
+  },
+  {
+    "id": "mel_risk",
+    "condition": "melanoma",
+    "title": "Melanoma: Risk Factors",
+    "text": "Key risk factors for melanoma include: personal or family history of melanoma; having more than 50 moles or dysplastic (atypical) moles; fair skin, light hair, and light eyes; history of blistering sunburns especially in childhood; excessive UV exposure from sun or tanning beds; weakened immune system; and age over 50 (though melanoma is also common in young adults). About 10% of cases are familial — CDKN2A gene mutations significantly elevate lifetime risk. High-risk individuals should have full-body dermatologist examinations at least annually.",
+    "tags": ["melanoma", "risk factors", "family history", "UV", "fair skin", "dysplastic moles", "tanning"]
+  },
+  {
+    "id": "mel_action",
+    "condition": "melanoma",
+    "title": "Melanoma: What to Do If Suspected",
+    "text": "If melanoma is suspected, seek dermatologist evaluation within 1–2 weeks — do not wait. The dermatologist will perform dermoscopy and likely a biopsy to confirm diagnosis. Early-stage melanoma is treated with surgical excision and is often curative. Advanced disease may require immunotherapy, targeted therapy (for BRAF mutations), or radiation. Do NOT attempt to treat or remove a suspicious mole yourself. Avoid further sun exposure on the lesion. Prognosis is excellent when caught early: stage I melanoma has a 98%+ survival rate; stage IV is much harder to treat.",
+    "tags": ["melanoma", "treatment", "biopsy", "surgery", "excision", "immunotherapy", "urgent", "action"]
+  },
+  {
+    "id": "bcc_overview",
+    "condition": "basal_cell_carcinoma",
+    "title": "Basal Cell Carcinoma: Overview",
+    "text": "Basal cell carcinoma (BCC) is the most common skin cancer worldwide, accounting for about 80% of all cases. It arises from basal cells in the deepest layer of the epidermis and grows slowly. BCC rarely metastasizes, making it highly treatable when caught early — but left untreated it can cause significant local tissue destruction. It is most common on sun-exposed areas: the face, scalp, neck, and ears. Risk factors include prolonged UV exposure, fair skin, and a history of prior BCC. People who have had one BCC have approximately a 50% chance of developing another within 5 years.",
+    "tags": ["basal cell carcinoma", "BCC", "skin cancer", "common", "sun damage", "epidermis", "local invasion"]
+  },
+  {
+    "id": "bcc_appearance",
+    "condition": "basal_cell_carcinoma",
+    "title": "Basal Cell Carcinoma: Visual Appearance",
+    "text": "The most common nodular BCC appears as a pearly or translucent bump with visible blood vessels (telangiectasias) and often a central ulcer or rolled (raised) border. Superficial BCC looks like a flat reddish patch similar to eczema or psoriasis. Sclerosing BCC appears as a whitish, scar-like, flat or depressed area and is more aggressive. BCC may bleed easily, crust repeatedly, and fail to heal. It is usually painless unless deeply invasive. The characteristic pearly sheen with visible blood vessels is pathognomonic for nodular BCC.",
+    "tags": ["BCC", "basal cell carcinoma", "pearly", "translucent", "telangiectasia", "ulcer", "appearance"]
+  },
+  {
+    "id": "bcc_treatment",
+    "condition": "basal_cell_carcinoma",
+    "title": "Basal Cell Carcinoma: Treatment Options",
+    "text": "Any suspected BCC should be biopsied and treated promptly. Mohs micrographic surgery — where tissue is removed layer by layer and checked microscopically in real time — has the highest cure rate (99%) and is preferred for facial or high-risk lesions. Standard surgical excision is used for less complex cases. Cryotherapy (liquid nitrogen) or curettage and electrodessication are effective for small, superficial lesions. Topical imiquimod or 5-fluorouracil cream can treat superficial BCC. Radiation therapy is an option when surgery is not feasible. Regular follow-ups after treatment are essential.",
+    "tags": ["BCC", "treatment", "Mohs", "surgery", "cryotherapy", "imiquimod", "radiation", "cure"]
+  },
+  {
+    "id": "scc_overview",
+    "condition": "squamous_cell_carcinoma",
+    "title": "Squamous Cell Carcinoma: Overview",
+    "text": "Squamous cell carcinoma (SCC) is the second most common skin cancer. It arises from squamous cells in the outer skin layers and, unlike BCC, can metastasize — particularly when arising on the lips, ears, or genitalia, or in immunosuppressed patients. SCC frequently develops from precancerous actinic keratoses and is strongly linked to cumulative UV exposure, making it most common in older adults with significant sun damage. With early surgical treatment, cure rates exceed 95%. High-risk locations, large size (>2 cm), deep invasion, or immunosuppression are associated with greater metastatic risk.",
+    "tags": ["squamous cell carcinoma", "SCC", "skin cancer", "metastasis", "UV", "actinic keratosis"]
+  },
+  {
+    "id": "scc_appearance",
+    "condition": "squamous_cell_carcinoma",
+    "title": "Squamous Cell Carcinoma: Visual Appearance",
+    "text": "SCC typically presents as a firm, red nodule or a flat lesion with a rough, scaly, crusted surface on sun-damaged skin. It may appear as: a rough, keratotic patch; a firm ulcerated nodule; a new sore on an old scar; a warty or horn-like growth (cutaneous horn); or a persistent sore on the lip or inside the mouth. SCC may bleed, ulcerate, and repeatedly fail to heal. Bowen's disease (SCC in situ) presents as a persistent, well-demarcated red scaly patch. Keratoacanthoma — a rapidly growing dome-shaped nodule with a central keratin plug — is a variant treated similarly to SCC.",
+    "tags": ["SCC", "squamous cell", "appearance", "scaly", "ulcer", "nodule", "Bowen", "keratoacanthoma"]
+  },
+  {
+    "id": "nevus_overview",
+    "condition": "benign_nevus",
+    "title": "Benign Nevus (Common Mole): Overview",
+    "text": "A benign nevus is a non-cancerous growth of melanocytes, the pigment-producing skin cells. Most adults have 10–40 moles; having more than 50 modestly increases melanoma risk. Moles appear during childhood and adolescence and typically remain stable. The vast majority are entirely harmless. Congenital nevi (present at birth) and dysplastic (atypical) nevi carry a slightly higher risk of transformation. Changes in an existing mole are more clinically significant than the mere presence of moles. Monthly self-monitoring and periodic professional skin checks are the primary management strategy.",
+    "tags": ["benign nevus", "mole", "melanocyte", "non-cancerous", "common mole", "dysplastic", "congenital"]
+  },
+  {
+    "id": "nevus_appearance",
+    "condition": "benign_nevus",
+    "title": "Benign Nevus: What It Looks Like",
+    "text": "A typical benign nevus is symmetric with even, well-defined borders. It is uniformly colored — usually a single shade of tan, brown, or dark brown — and is less than 6 mm in diameter. It may be flat (junctional nevus), slightly raised (compound nevus), or dome-shaped (intradermal nevus). The surface is smooth and the color uniform. Benign moles remain stable over many years. A mole that 'stands out' from all of a patient's other moles — the 'ugly duckling' sign — warrants attention even if it otherwise looks typical. New moles after age 30–40 should be evaluated by a dermatologist.",
+    "tags": ["benign nevus", "mole", "symmetric", "uniform color", "flat", "dome", "appearance"]
+  },
+  {
+    "id": "nevus_management",
+    "condition": "benign_nevus",
+    "title": "Benign Nevus: Monitoring and When to Act",
+    "text": "Most benign moles require only periodic monitoring. Perform monthly self-checks using the ABCDE criteria and photograph moles for comparison. Annual professional skin checks are recommended for those with many moles or a family history of melanoma. Dermoscopy allows trained dermatologists to distinguish benign from atypical moles more accurately than visual inspection alone. Total-body photography helps track moles over time. A mole that changes, bleeds, itches, or looks concerning should be evaluated promptly — do not wait for the next annual check. Elective removal for cosmetic reasons is available.",
+    "tags": ["benign nevus", "mole", "monitoring", "ABCDE", "dermoscopy", "self-check", "removal"]
+  },
+  {
+    "id": "sk_overview",
+    "condition": "seborrheic_keratosis",
+    "title": "Seborrheic Keratosis: Overview",
+    "text": "Seborrheic keratosis (SK) is one of the most common benign skin growths, typically appearing in middle-aged to older adults. Despite their sometimes alarming appearance, SKs are entirely benign with no potential for malignant transformation. They arise from keratinocytes and often run in families. A person may develop dozens or even hundreds over a lifetime. The sudden appearance of many new SKs (Leser-Trélat sign) can occasionally signal an internal malignancy, though this is rare. Treatment is optional — done for cosmetic reasons or when lesions are irritated by friction. SKs are not dangerous and do not require urgent evaluation.",
+    "tags": ["seborrheic keratosis", "SK", "benign", "non-cancerous", "older adults", "keratinocyte", "waxy"]
+  },
+  {
+    "id": "sk_appearance",
+    "condition": "seborrheic_keratosis",
+    "title": "Seborrheic Keratosis: Visual Appearance",
+    "text": "Seborrheic keratoses have a characteristic 'stuck-on' waxy or verrucous appearance, as if they could be peeled off the skin. They range from tan to dark brown or nearly black, with a matte, rough, or granular surface texture. They are well-circumscribed with clearly defined borders and vary in size from a few millimeters to several centimeters. On dermoscopy, keratin horn cysts and milia-like cysts arranged in a cerebriform (brain-like) pattern are pathognomonic. They are most common on the trunk, back, and face. The 'stuck-on' look and lack of irregular borders help distinguish them from melanoma.",
+    "tags": ["seborrheic keratosis", "stuck-on", "waxy", "warty", "brown", "appearance", "benign"]
+  },
+  {
+    "id": "ak_overview",
+    "condition": "actinic_keratosis",
+    "title": "Actinic Keratosis: Overview and Cancer Risk",
+    "text": "Actinic keratosis (AK), also called solar keratosis, is a precancerous lesion caused by cumulative UV radiation damage to skin cells. Many dermatologists consider it squamous cell carcinoma in situ. Without treatment, approximately 5–10% of AKs progress to invasive SCC over 10 years. AKs affect more than 58 million Americans and are extremely common in fair-skinned individuals over age 40 with a history of sun exposure. Because it is impossible to predict which individual AK will progress to cancer, treatment is generally recommended for all identified lesions. Early field therapy reduces the overall burden of sun-damaged skin.",
+    "tags": ["actinic keratosis", "AK", "solar keratosis", "precancerous", "UV", "SCC", "sun damage"]
+  },
+  {
+    "id": "ak_appearance",
+    "condition": "actinic_keratosis",
+    "title": "Actinic Keratosis: Visual Appearance",
+    "text": "Actinic keratoses appear as rough, dry, scaly patches on sun-damaged skin — the face, lips, ears, scalp, neck, and backs of hands are most commonly affected. They are often easier to feel than see, with a sandpaper-like texture on touch. AKs are usually small (under 1 cm), range from skin-color to pink, red, or brown, and may occasionally itch or burn. Hypertrophic AKs are thick and rough, resembling warts. A cutaneous horn — a hard cone-shaped projection — can arise from an AK. Any persistent rough or scaly patch on chronically sun-damaged skin should be evaluated by a dermatologist within 2–4 weeks.",
+    "tags": ["actinic keratosis", "rough", "scaly", "sandpaper", "pink", "sun-damaged", "cutaneous horn"]
+  },
+  {
+    "id": "ak_treatment",
+    "condition": "actinic_keratosis",
+    "title": "Actinic Keratosis: Treatment",
+    "text": "Treatment prevents progression to squamous cell carcinoma. For individual lesions, cryotherapy (liquid nitrogen freezing) is the most common in-office procedure and is highly effective. For widespread field disease, topical chemotherapy (5-fluorouracil cream), immune modulation (imiquimod), or photodynamic therapy (PDT) treat multiple lesions simultaneously. After treatment, new AKs frequently develop on chronically sun-damaged skin, so regular follow-up and strict sun protection are essential. Seek dermatologist evaluation within 2–4 weeks for any suspected actinic keratosis.",
+    "tags": ["actinic keratosis", "treatment", "cryotherapy", "5-FU", "imiquimod", "PDT", "photodynamic"]
+  },
+  {
+    "id": "df_overview",
+    "condition": "dermatofibroma",
+    "title": "Dermatofibroma: Overview",
+    "text": "Dermatofibroma is a common, benign fibrous nodule of the dermis, thought to arise as a reactive growth following minor trauma (insect bite, minor injury) or folliculitis. It is entirely benign and has no potential for malignant transformation. Dermatofibromas are more common in women and most often appear on the lower legs, though they can occur anywhere. Most people have 1–3. They are permanent (do not spontaneously resolve) but require no treatment unless they are bothersome or cosmetically unwanted. They are sometimes mistaken for melanoma due to their pigmentation — the dimple sign is the key distinguishing feature.",
+    "tags": ["dermatofibroma", "benign", "fibrous nodule", "lower legs", "reactive", "harmless", "dimple"]
+  },
+  {
+    "id": "df_appearance",
+    "condition": "dermatofibroma",
+    "title": "Dermatofibroma: Visual Appearance and Diagnosis",
+    "text": "Dermatofibromas are firm, slightly raised or subtly indented nodules, typically 5–10 mm in diameter, ranging from brown to red-brown or hyperpigmented. The classic diagnostic sign is the 'dimple sign': when the lesion is pinched between two fingers, it dimples inward (retracts) rather than protrudes — this response is unique to dermatofibromas and highly diagnostic. The surface is smooth and the borders well-defined. Most are found on the shins and lower extremities. On dermoscopy, a central white scar-like patch surrounded by a peripheral pigment network is characteristic.",
+    "tags": ["dermatofibroma", "dimple sign", "firm", "brown", "lower legs", "appearance", "diagnosis"]
+  },
+  {
+    "id": "vasc_overview",
+    "condition": "vascular_lesion",
+    "title": "Vascular Skin Lesions: Overview",
+    "text": "Vascular lesions arise from blood or lymphatic vessels and include a wide spectrum of mostly benign growths. Common benign types include: cherry angiomas (bright red papules from dilated capillaries, very common with aging); spider angiomas (central arteriole with radiating vessels); pyogenic granulomas (rapidly growing moist lesions that bleed profusely); port-wine stains (capillary malformation present at birth); infantile hemangiomas ('strawberry marks', which involute over years); and venous lakes (dark purple lesions on lips or ears in older adults). Rapidly growing, ulcerated, or bleeding lesions warrant prompt evaluation. Angiosarcoma — a rare malignant vascular tumor — can mimic benign lesions.",
+    "tags": ["vascular lesion", "angioma", "hemangioma", "cherry angioma", "pyogenic granuloma", "port wine stain"]
+  },
+  {
+    "id": "vasc_appearance",
+    "condition": "vascular_lesion",
+    "title": "Vascular Skin Lesions: Visual Appearance",
+    "text": "Vascular lesions are typically red, purple, or blue due to visible blood. Cherry angiomas are bright red, smooth 1–4 mm papules on the trunk, increasing in number with age. Pyogenic granulomas are bright red, moist, rapidly growing lesions that bleed profusely with minimal trauma — they often appear after minor injury. Spider nevi have a central red dot with fine radiating vessels; they blanch fully under pressure. Port-wine stains are flat, sharply demarcated pink-to-deep-red patches present from birth. Diascopy (pressing a glass slide against the lesion) showing blanching confirms a vascular origin.",
+    "tags": ["vascular lesion", "red", "purple", "cherry angioma", "pyogenic granuloma", "hemangioma", "blanching"]
+  },
+  {
+    "id": "normal_overview",
+    "condition": "normal_skin",
+    "title": "Normal Skin: Common Benign Findings",
+    "text": "Normal skin displays a wide variety of features that are entirely benign. Common normal findings include: freckles (ephelides) — small, flat, light brown spots darkening with sun exposure; solar lentigines ('age spots') — flat well-defined brown patches on sun-exposed skin; sebaceous hyperplasia — enlarged yellowish follicular bumps on the face; milia — small white keratin cysts; skin tags (acrochordons) — soft, flesh-colored pedunculated growths in skin folds; and Fordyce spots — small white or yellowish bumps on lips or genitalia. While these are typically harmless, any new, changing, or unusual skin feature deserves professional evaluation.",
+    "tags": ["normal skin", "freckles", "age spots", "skin tags", "sebaceous", "milia", "benign", "Fordyce"]
+  },
+  {
+    "id": "psoriasis_overview",
+    "condition": "general",
+    "title": "Psoriasis: Overview",
+    "text": "Psoriasis is a chronic autoimmune condition causing rapid skin cell turnover, resulting in thick, scaly plaques. Plaque psoriasis — the most common type — produces raised, red patches covered with silvery-white scales, most often on the elbows, knees, scalp, and lower back. It affects about 2–3% of the world's population and is not contagious. About 30% of patients develop psoriatic arthritis (joint pain and stiffness). Common triggers include stress, infections, certain medications, skin injury, and alcohol. While there is no cure, many effective treatments — including topical steroids, biologics, and phototherapy — can control symptoms significantly.",
+    "tags": ["psoriasis", "autoimmune", "plaques", "scaly", "silver", "chronic", "elbows", "knees", "scalp"]
+  },
+  {
+    "id": "eczema_overview",
+    "condition": "general",
+    "title": "Eczema (Atopic Dermatitis): Overview",
+    "text": "Eczema (atopic dermatitis) is a chronic inflammatory skin condition characterized by dry, itchy, inflamed skin. It affects roughly 10–20% of children and 1–3% of adults and is not contagious. Key symptoms include intense itching (often worse at night), dry cracked skin, red-to-brownish patches, small raised bumps that may weep fluid, and thickened or scaly skin. Common affected areas are the insides of the elbows and knees, neck, wrists, and hands. Common triggers include dry skin, soaps and detergents, allergens (dust, pet dander, pollen), stress, sweating, and temperature extremes. Good emollient use and trigger avoidance are the cornerstones of management.",
+    "tags": ["eczema", "atopic dermatitis", "itchy", "dry skin", "inflammation", "chronic", "children"]
+  },
+  {
+    "id": "rash_overview",
+    "condition": "general",
+    "title": "Skin Rashes: Common Causes and When to Seek Care",
+    "text": "A skin rash is any change in the skin's color, texture, or feel. Common causes include: contact dermatitis (reaction to irritants or allergens such as poison ivy, latex, or nickel); allergic hives (urticaria); viral infections (chickenpox, shingles, measles); fungal infections (ringworm, athlete's foot); bacterial infections (impetigo, cellulitis); heat rash; and autoimmune conditions. Most rashes are self-limiting. Seek urgent medical care if: the rash spreads rapidly; involves the face or throat with difficulty breathing; is accompanied by high fever; shows small purple spots that don't blanch under pressure (petechiae — a sign of possible meningitis); or severely impairs daily life.",
+    "tags": ["rash", "dermatitis", "allergic", "hives", "urticaria", "contact dermatitis", "infection", "fungal"]
+  },
+  {
+    "id": "gen_itch",
+    "condition": "general",
+    "title": "Itchy Skin (Pruritus): Causes and Management",
+    "text": "Itchy skin (pruritus) is one of the most common dermatological symptoms. Common causes include: dry skin (xerosis) — especially in winter or with age; eczema and other inflammatory conditions; allergic reactions; psoriasis; fungal infections; insect bites; contact dermatitis; liver or kidney disease; and anxiety. Most cases of localized itch are benign. Generalized persistent itch without a visible rash can occasionally signal an internal condition and warrants medical evaluation. Management starts with gentle moisturizers, avoiding hot showers, and identifying triggers. Topical corticosteroids, antihistamines, and anti-itch creams may relieve symptoms pending diagnosis.",
+    "tags": ["itch", "pruritus", "itchy", "dry skin", "allergic", "eczema", "psoriasis", "treatment"]
+  },
+  {
+    "id": "gen_bleeding_lesion",
+    "condition": "general",
+    "title": "Bleeding Skin Lesions: What to Do",
+    "text": "A skin lesion that bleeds spontaneously or with minimal trauma deserves prompt medical evaluation. Causes of bleeding lesions include: pyogenic granuloma (a rapidly growing vascular growth that bleeds easily); melanoma or other skin cancer; basal cell or squamous cell carcinoma (especially ulcerated lesions); benign angiomas; or simple trauma to an existing benign mole. While many bleeding skin lesions are benign, bleeding is a clinically significant change — especially in an existing mole — and should be evaluated by a dermatologist within 1–2 weeks. Do not attempt to remove a bleeding lesion yourself. Keep the area clean and covered.",
+    "tags": ["bleeding", "lesion", "blood", "mole bleeding", "ulcerated", "pyogenic granuloma", "urgent"]
+  }
+]

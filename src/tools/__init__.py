@@ -11,7 +11,7 @@ which Gemma 4 uses for structured function-call outputs.
 Project: G4G RuralClinic AI — offline dermatology assistant.
 """
 
-# ─── Dermatology Tool ─────────────────────────────────────────────────────────
+# ─── Dermatology Analysis Tool ────────────────────────────────────────────────
 DERMATOLOGY_TOOL = {
     "type": "function",
     "function": {
@@ -43,7 +43,7 @@ DERMATOLOGY_TOOL = {
                     "description": (
                         "Optional: Body location of the skin lesion as described by the user. "
                         "Examples: 'left forearm', 'upper back', 'face near nose'. "
-                        "Helps contextualize the analysis."
+                        "Helps contextualise the analysis."
                     ),
                 },
                 "duration": {
@@ -54,12 +54,49 @@ DERMATOLOGY_TOOL = {
                     ),
                 },
             },
-            "required": [],  # Image is passed separately via multimodal message content
+            "required": [],
+        },
+    },
+}
+
+# ─── RAG Knowledge Retrieval Tool ─────────────────────────────────────────────
+RAG_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "retrieve_dermatology_knowledge",
+        "description": (
+            "Retrieve relevant dermatology knowledge to answer educational questions "
+            "about skin conditions, treatments, prevention, or general skin health. "
+            "Use this tool when the user asks a knowledge or information question — "
+            "e.g. 'What is melanoma?', 'How do I check a mole?', 'What causes psoriasis?', "
+            "'When should I see a dermatologist?'. "
+            "Returns relevant excerpts from an offline dermatology knowledge base. "
+            "Does NOT require or analyse an image."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "The user's question or topic to look up. "
+                        "Examples: 'What is the ABCDE rule?', 'basal cell carcinoma treatment', "
+                        "'how to do a skin self-exam'."
+                    ),
+                },
+                "condition": {
+                    "type": "string",
+                    "description": (
+                        "Optional: specific skin condition to focus the search on. "
+                        "Examples: 'melanoma', 'eczema', 'actinic_keratosis'."
+                    ),
+                },
+            },
+            "required": ["query"],
         },
     },
 }
 
 # ─── Tool Registry ────────────────────────────────────────────────────────────
-# All tools available to the orchestrator for routing decisions.
-TOOL_SCHEMAS: list[dict] = [DERMATOLOGY_TOOL]
+TOOL_SCHEMAS: list[dict] = [DERMATOLOGY_TOOL, RAG_TOOL]
 TOOL_NAMES: set[str] = {t["function"]["name"] for t in TOOL_SCHEMAS}

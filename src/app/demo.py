@@ -1,20 +1,22 @@
 """
 Gradio demo interface for G4G RuralClinic AI — Offline Dermatology Assistant.
 
+Two-tab layout:
+  Tab 1 — Image Analysis: upload a skin image + describe symptoms, get a
+           structured analysis with classification, ABCDE notes, and
+           recommended action.  Full function-call trace shown for transparency.
+  Tab 2 — Knowledge Chat: ask plain-language dermatology questions answered
+           by the RAG worker using the offline knowledge base.
+
 Features:
-  - Image upload for skin lesion analysis
-  - Free-text symptom description box
-  - "Analyze" button that calls orchestrator.route_and_run()
-  - Structured result panel with classification, ABCDE notes, and recommendation
-  - Function-call trace panel for transparency/auditability
-  - Offline toggle checkbox
-  - Persistent safety disclaimer
+  - Offline toggle: restricts external calls after initial model pull.
+  - Persistent safety disclaimer on every response.
+  - Lazy model loading: Ollama/HF backend initialised on first request.
 
 Usage:
     python -m src.app.demo
 
-The Gradio server starts at http://localhost:7860 by default.
-No internet connection is required after the initial model pull.
+Opens at http://localhost:7860.
 
 Project: G4G RuralClinic AI — offline frontier AI for accessible
 dermatology screening in rural and underserved communities.
@@ -27,7 +29,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Ensure the project root is importable regardless of working directory.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from PIL import Image
@@ -41,12 +42,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Lazy singleton — model loads on first Analyze click, not at import time.
+# Lazy singletons — loaded on first request, not at import time.
 _orchestrator = None
+_rag_worker = None
 
 
 def _get_orchestrator():
-    """Return the shared Orchestrator instance, initialising it if needed."""
     global _orchestrator
     if _orchestrator is None:
         logger.info("Initialising Orchestrator (first request)…")
@@ -55,7 +56,16 @@ def _get_orchestrator():
     return _orchestrator
 
 
-# ─── Gradio callbacks ─────────────────────────────────────────────────────────
+def _get_rag_worker():
+    global _rag_worker
+    if _rag_worker is None:
+        logger.info("Initialising RAGWorker (first Knowledge Chat request)…")
+        from src.workers.rag_worker import RAGWorker
+        _rag_worker = RAGWorker(use_ollama=True)
+    return _rag_worker
+
+
+# ─── Tab 1: Image Analysis ────────────────────────────────────────────────────
 
 def run_analysis(
     image: Optional[Image.Image],
@@ -63,12 +73,7 @@ def run_analysis(
     offline_mode: bool,
 ) -> tuple[str, str, str]:
     """
-    Main Gradio callback triggered by the Analyze button.
-
-    Args:
-        image: PIL Image uploaded by the user, or None.
-        symptoms: Free-text symptom description.
-        offline_mode: Whether to restrict internet access.
+    Gradio callback for the Analyse button.
 
     Returns:
         (result_markdown, trace_markdown, disclaimer_markdown)
@@ -92,47 +97,38 @@ def run_analysis(
             detail = format_for_display(result["worker_result"])
             synthesis = result.get("response", "").strip()
             if synthesis and len(synthesis) > 30:
-                display = f"### AI Summary\n{synthesis}\n\n---\n\n### Detailed Analysis\n{detail}"
+                display = (
+                    "### AI Summary\n" + synthesis
+                    + "\n\n---\n\n### Detailed Analysis\n" + detail
+                )
             else:
                 display = detail
+        elif result.get("rag_result"):
+            # Image was None but RAG answered a knowledge question
+            display = result.get("response", "*No response generated.*")
         else:
             display = result.get("response", "*No response generated.*")
 
         if result.get("error"):
             display = f"**Error:** {result['error']}\n\n{display}"
 
-        # ── Format trace panel ────────────────────────────────────────────
-        calls = result.get("function_calls", [])
-        if calls:
-            trace_parts = ["### Function Calls Traced\n"]
-            for i, call in enumerate(calls, 1):
-                args_str = json.dumps(call.get("arguments", {}), indent=2)
-                trace_parts.append(
-                    f"**{i}. Tool:** `{call['tool']}`  \n"
-                    f"**Arguments:**\n```json\n{args_str}\n```  \n"
-                    f"**Result keys:** `{call.get('result_keys', [])}`  \n"
-                    f"**Timestamp:** {call.get('timestamp', 'N/A')}\n"
-                )
-            trace_md = "\n".join(trace_parts)
-        else:
-            trace_md = "*No tool calls made — query handled as a general question.*"
+        # ── Format function-call trace panel ─────────────────────────────
+        trace_md = _format_trace(result.get("function_calls", []))
 
         return display, trace_md, SAFETY_DISCLAIMER
 
     except Exception as exc:
-        logger.exception("Demo error: %s", exc)
-        error_display = (
+        logger.exception("Analysis error: %s", exc)
+        return (
             f"**An error occurred:** {exc}\n\n"
-            f"Please ensure Ollama is running (`ollama serve`) and "
-            f"the model is available (`ollama pull {MODEL_NAME}`).\n\n"
-            f"If using the HuggingFace fallback, ensure the model files are "
-            f"downloaded and `OFFLINE_MODE` is set correctly."
+            f"Ensure Ollama is running (`ollama serve`) and the model is available "
+            f"(`ollama pull {MODEL_NAME}`).",
+            "*Error — no function calls completed.*",
+            SAFETY_DISCLAIMER,
         )
-        return error_display, "*Error — no function calls completed.*", SAFETY_DISCLAIMER
 
 
-def clear_session() -> tuple[str, str, str]:
-    """Clear conversation history and reset UI panels."""
+def clear_analysis() -> tuple[str, str, str]:
     global _orchestrator
     if _orchestrator is not None:
         _orchestrator.clear_history()
@@ -143,19 +139,93 @@ def clear_session() -> tuple[str, str, str]:
     )
 
 
+# ─── Tab 2: Knowledge Chat ────────────────────────────────────────────────────
+
+def ask_knowledge(
+    question: str,
+    offline_mode: bool,
+) -> tuple[str, str, str]:
+    """
+    Gradio callback for the Ask button in the Knowledge Chat tab.
+
+    Returns:
+        (answer_markdown, sources_markdown, disclaimer_markdown)
+    """
+    os.environ["OFFLINE_MODE"] = "true" if offline_mode else "false"
+
+    question = question.strip()
+    if not question:
+        return (
+            "*Please enter a question about a skin condition.*",
+            "*No sources retrieved.*",
+            SAFETY_DISCLAIMER,
+        )
+
+    try:
+        rag = _get_rag_worker()
+        result = rag.answer(question)
+
+        answer = result.get("answer", "*No answer generated.*")
+
+        sources = result.get("sources", [])
+        if sources:
+            src_lines = ["### Knowledge Sources Retrieved\n"]
+            for i, s in enumerate(sources, 1):
+                cond = (s.get("condition") or "general").replace("_", " ").title()
+                title = s.get("title", "Unknown")
+                score = s.get("score", 0)
+                src_lines.append(f"**{i}. {title}** *(condition: {cond}, relevance: {score:.2f})*")
+            sources_md = "\n".join(src_lines)
+        else:
+            sources_md = "*No relevant knowledge chunks found.*"
+
+        return answer, sources_md, SAFETY_DISCLAIMER
+
+    except Exception as exc:
+        logger.exception("Knowledge chat error: %s", exc)
+        return (
+            f"**An error occurred:** {exc}",
+            "*Error retrieving sources.*",
+            SAFETY_DISCLAIMER,
+        )
+
+
+def clear_knowledge() -> tuple[str, str, str]:
+    return (
+        "*Enter a question about a skin condition to begin.*",
+        "*No sources retrieved.*",
+        SAFETY_DISCLAIMER,
+    )
+
+
+# ─── Shared helpers ───────────────────────────────────────────────────────────
+
+def _format_trace(calls: list[dict]) -> str:
+    if not calls:
+        return "*No tool calls made — query handled as a general question.*"
+    parts = ["### Function Calls Traced\n"]
+    for i, call in enumerate(calls, 1):
+        args_str = json.dumps(call.get("arguments", {}), indent=2)
+        parts.append(
+            f"**{i}. Tool:** `{call['tool']}`  \n"
+            f"**Arguments:**\n```json\n{args_str}\n```  \n"
+            f"**Result keys:** `{call.get('result_keys', [])}`  \n"
+            f"**Timestamp:** {call.get('timestamp', 'N/A')}\n"
+        )
+    return "\n".join(parts)
+
+
 # ─── UI construction ──────────────────────────────────────────────────────────
 
 def build_demo():
-    """
-    Build and return the Gradio Blocks interface.
-    Separated from main() to allow test-time import without launching a server.
-    """
+    """Build and return the Gradio Blocks interface."""
     import gradio as gr
 
     _CSS = """
     .disclaimer { background:#fff8e1; border:1px solid #f9a825;
                   border-radius:6px; padding:10px; font-size:0.88em; }
     .result-panel { line-height:1.65; }
+    .offline-badge { font-size:0.82em; color:#555; }
     """
 
     with gr.Blocks(
@@ -166,74 +236,135 @@ def build_demo():
 
         gr.Markdown(
             "# G4G RuralClinic AI — Offline Dermatology Assistant\n"
-            "**Powered by Gemma 4 · Fully Offline · Educational Use Only**\n\n"
-            "Upload a skin lesion image and/or describe your symptoms. "
-            "The AI will analyse the image using Gemma 4's multimodal capabilities "
-            "and provide an informational assessment — not a diagnosis."
+            "**Powered by Gemma 4 · Fully Offline · Educational Use Only**"
         )
 
+        # ── Shared offline toggle ─────────────────────────────────────────
         with gr.Row():
-            # ── Left column: inputs ──────────────────────────────────────
-            with gr.Column(scale=1):
-                image_input = gr.Image(
-                    type="pil",
-                    label="Skin Lesion Image",
-                    height=280,
-                )
-                symptoms_input = gr.Textbox(
-                    label="Symptom Description (optional)",
-                    placeholder=(
-                        "e.g. 'Dark mole on my upper arm that has been growing "
-                        "and changing colour over the past 3 months. Sometimes itchy.'"
-                    ),
-                    lines=4,
-                )
-                offline_toggle = gr.Checkbox(
-                    label="Offline Mode (disable internet access)",
-                    value=OFFLINE_MODE,
-                    info="All inference runs locally — no data leaves your machine.",
+            offline_toggle = gr.Checkbox(
+                label="Offline Mode (no internet after initial model pull)",
+                value=OFFLINE_MODE,
+                info="All inference runs locally — no data leaves your machine.",
+                scale=2,
+            )
+            gr.Markdown(
+                f"*Model: `{MODEL_NAME}` · "
+                "Run `ollama serve` then `ollama pull gemma4:e4b` before first use.*",
+                elem_classes=["offline-badge"],
+                scale=3,
+            )
+
+        # ── Tabs ──────────────────────────────────────────────────────────
+        with gr.Tabs():
+
+            # ── Tab 1: Image Analysis ─────────────────────────────────────
+            with gr.TabItem("Image Analysis"):
+                gr.Markdown(
+                    "Upload a skin lesion image and/or describe symptoms. "
+                    "Gemma 4 will analyse the image using multimodal function calling "
+                    "and provide an informational assessment — **not a diagnosis**."
                 )
                 with gr.Row():
-                    analyze_btn = gr.Button("Analyse", variant="primary", scale=3)
-                    clear_btn = gr.Button("Clear", scale=1)
+                    with gr.Column(scale=1):
+                        image_input = gr.Image(
+                            type="pil",
+                            label="Skin Lesion Image",
+                            height=280,
+                        )
+                        symptoms_input = gr.Textbox(
+                            label="Symptom Description (optional)",
+                            placeholder=(
+                                "e.g. 'Dark mole on upper arm, growing and changing "
+                                "colour over 3 months. Sometimes itchy.'"
+                            ),
+                            lines=4,
+                        )
+                        with gr.Row():
+                            analyse_btn = gr.Button("Analyse", variant="primary", scale=3)
+                            clear_btn = gr.Button("Clear", scale=1)
 
-            # ── Right column: outputs ────────────────────────────────────
-            with gr.Column(scale=1):
-                result_output = gr.Markdown(
-                    value="*Upload an image or enter symptoms to begin.*",
-                    label="Analysis Result",
-                    elem_classes=["result-panel"],
+                    with gr.Column(scale=1):
+                        result_output = gr.Markdown(
+                            value="*Upload an image or enter symptoms to begin.*",
+                            label="Analysis Result",
+                            elem_classes=["result-panel"],
+                        )
+                        with gr.Accordion("Function Call Trace", open=False):
+                            trace_output = gr.Markdown(value="*No analysis run yet.*")
+
+                disclaimer_analysis = gr.Markdown(
+                    value=SAFETY_DISCLAIMER,
+                    elem_classes=["disclaimer"],
                 )
-                with gr.Accordion("Function Call Trace", open=False):
-                    trace_output = gr.Markdown(
-                        value="*No analysis run yet.*",
-                    )
 
-        disclaimer_box = gr.Markdown(
-            value=SAFETY_DISCLAIMER,
-            elem_classes=["disclaimer"],
-        )
+                analyse_btn.click(
+                    fn=run_analysis,
+                    inputs=[image_input, symptoms_input, offline_toggle],
+                    outputs=[result_output, trace_output, disclaimer_analysis],
+                )
+                clear_btn.click(
+                    fn=clear_analysis,
+                    inputs=[],
+                    outputs=[result_output, trace_output, disclaimer_analysis],
+                )
 
-        # ── Wire callbacks ────────────────────────────────────────────────
-        analyze_btn.click(
-            fn=run_analysis,
-            inputs=[image_input, symptoms_input, offline_toggle],
-            outputs=[result_output, trace_output, disclaimer_box],
-        )
-        clear_btn.click(
-            fn=clear_session,
-            inputs=[],
-            outputs=[result_output, trace_output, disclaimer_box],
-        )
+            # ── Tab 2: Knowledge Chat ─────────────────────────────────────
+            with gr.TabItem("Knowledge Chat"):
+                gr.Markdown(
+                    "Ask any dermatology question. Answers are grounded in an **offline "
+                    "knowledge base** — no image required. "
+                    "Try: *'What is the ABCDE rule?'*, *'How do I check a mole?'*, "
+                    "*'What causes psoriasis?'*"
+                )
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        question_input = gr.Textbox(
+                            label="Your Question",
+                            placeholder=(
+                                "e.g. 'What is melanoma?', 'When should I see a dermatologist?', "
+                                "'How can I protect my skin from UV damage?'"
+                            ),
+                            lines=3,
+                        )
+                        with gr.Row():
+                            ask_btn = gr.Button("Ask", variant="primary", scale=3)
+                            clear_kb_btn = gr.Button("Clear", scale=1)
 
+                    with gr.Column(scale=1):
+                        answer_output = gr.Markdown(
+                            value="*Enter a question to begin.*",
+                            label="Answer",
+                            elem_classes=["result-panel"],
+                        )
+                        with gr.Accordion("Retrieved Knowledge Sources", open=False):
+                            sources_output = gr.Markdown(value="*No sources retrieved.*")
+
+                disclaimer_knowledge = gr.Markdown(
+                    value=SAFETY_DISCLAIMER,
+                    elem_classes=["disclaimer"],
+                )
+
+                ask_btn.click(
+                    fn=ask_knowledge,
+                    inputs=[question_input, offline_toggle],
+                    outputs=[answer_output, sources_output, disclaimer_knowledge],
+                )
+                clear_kb_btn.click(
+                    fn=clear_knowledge,
+                    inputs=[],
+                    outputs=[answer_output, sources_output, disclaimer_knowledge],
+                )
+
+        # ── Footer ────────────────────────────────────────────────────────
         gr.Markdown(
             "---\n"
             "**How it works**\n\n"
-            "1. Your image + symptoms are processed entirely on your local machine.\n"
-            "2. The orchestrator uses **Gemma 4 function calling** to decide "
-            "   whether to invoke the dermatology specialist worker.\n"
-            "3. The specialist analyses the image with Gemma 4's multimodal pipeline.\n"
-            "4. Results are synthesised into plain language with mandatory safety guardrails.\n\n"
+            "1. Your data is processed entirely on your local machine.\n"
+            "2. **Image Analysis** uses Gemma 4 function calling to decide whether to "
+            "   invoke the dermatology specialist worker (visual + ABCDE assessment).\n"
+            "3. **Knowledge Chat** retrieves relevant excerpts from an offline "
+            "   TF-IDF-indexed knowledge base and uses Gemma 4 to synthesise a grounded answer.\n"
+            "4. All outputs carry mandatory safety guardrails and a medical disclaimer.\n\n"
             "*G4G RuralClinic AI — bringing offline frontier AI to underserved communities.*"
         )
 
@@ -243,13 +374,12 @@ def build_demo():
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
-    """Launch the Gradio demo server."""
     logger.info("Starting G4G RuralClinic AI demo on http://localhost:7860")
     demo = build_demo()
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False,      # Offline-first: no public tunnel
+        share=False,
         show_error=True,
     )
 
