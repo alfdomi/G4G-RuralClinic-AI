@@ -1,19 +1,37 @@
 """
 Core orchestrator for G4G RuralClinic AI.
 
-Responsibilities:
-  1. Load Gemma 4 (via Ollama or HuggingFace pipeline).
-  2. Use Gemma 4's native function-calling API to decide which specialist
-     worker(s) to invoke for a given query + image.
-  3. Dispatch to the chosen workers and collect structured results.
-  4. Synthesise a final plain-language response with safety guardrails.
-  5. Maintain conversation history and produce a traceable function-call log.
+Two-phase agentic workflow:
 
-Full routing priority:
-  Image present  → always analyze_skin_lesion; also retrieve_dermatology_knowledge
-                   if the query looks like a knowledge question.
-  Text only      → Gemma 4 native tool calling (returns 0–2 tools).
-  Fallback       → keyword routing (analyze) or knowledge-query heuristic (RAG).
+  Phase 1 — Triage & Route  (_triage_query)
+  ──────────────────────────────────────────
+  Gemma 4 is invoked with the ROUTING_TOOL schema and returns a single
+  structured JSON routing decision:
+      {
+        "domain": "dermatology" | "general" | "unclear",
+        "triage_level": "urgent" | "moderate" | "low" | "unclear",
+        "extracted_symptoms": ["itchy", "dark mole", ...],
+        "recommended_workers": ["analyze_skin_lesion", ...],
+        "reasoning": "ABCDE features present: asymmetric border and …"
+      }
+  If Gemma 4 is unavailable, _heuristic_triage() produces the same
+  structure via keyword analysis.
+
+  Phase 2 — Worker Dispatch  (_dispatch_workers)
+  ────────────────────────────────────────────────
+  Each worker in routing_decision["recommended_workers"] is invoked:
+    analyze_skin_lesion         → DermatologyWorker (image + ABCDE)
+    retrieve_dermatology_knowledge → RAGWorker v2 (guidelines KB)
+  Results are logged to the function_call_log for UI transparency.
+
+  Phase 3 — Synthesis  (_synthesise_response)
+  ─────────────────────────────────────────────
+  Gemma 4 produces a compassionate plain-language summary from the
+  structured worker outputs, enriched with retrieved knowledge context
+  and the routing triage level as editorial tone guidance.
+  Safety enforcement (disclaimer + language softening) is applied last.
+
+Conversation history is maintained across calls; clear_history() resets it.
 
 Project: G4G RuralClinic AI — offline frontier AI for accessible
 dermatology screening in rural and underserved communities.
@@ -33,62 +51,98 @@ from src.config import (
     SAFETY_DISCLAIMER,
     HF_MODEL_NAME,
 )
-from src.tools import TOOL_SCHEMAS
+from src.tools import ROUTING_SCHEMAS, TOOL_SCHEMAS
 from src.utils.safety import enforce_safety
 from src.workers.dermatology import DermatologyWorker
-from src.workers.rag_worker import RAGWorker
+from src.workers.rag import RAGWorker
 
 logger = logging.getLogger(__name__)
 
-# ─── System prompt ────────────────────────────────────────────────────────────
-_SYSTEM_PROMPT = """You are a compassionate AI health assistant for rural and underserved communities.
-Your role is to help users understand skin conditions using image analysis and symptom descriptions.
+# ─── System prompts ───────────────────────────────────────────────────────────
 
-ABSOLUTE RULES — never break these:
-1. You are NOT a doctor. Never make a definitive medical diagnosis.
-2. Always recommend consulting a qualified dermatologist or healthcare professional.
-3. When the user provides a skin image OR describes a skin symptom, call the `analyze_skin_lesion` tool.
-4. When the user asks a knowledge question about skin conditions, call `retrieve_dermatology_knowledge`.
-5. Explain findings in plain language — avoid jargon.
-6. Be empathetic, supportive, and honest about uncertainty.
-7. If you are unsure, say so clearly."""
+_TRIAGE_SYSTEM = """You are a clinical triage AI for a rural dermatology screening tool.
+Your task is to analyse the user's message and any attached image and call the
+triage_and_route tool with a structured routing decision.
 
-# ─── Synthesis prompt ─────────────────────────────────────────────────────────
-_SYNTHESIS_PROMPT_TEMPLATE = """The user asked: "{query}"
+ALWAYS call triage_and_route — do not respond in plain text.
 
-A specialist AI analysis produced this structured result:
+Triage rules:
+- Image present OR personal skin symptoms described → domain = dermatology
+- ABCDE warning signs, bleeding, rapid growth, immunocompromised → triage = urgent
+- Changing mole, chronic rash, educational question about a condition → triage = moderate
+- Stable lesion, stable skin concern, pure knowledge question → triage = low
+- No skin involvement at all → domain = general, recommended_workers = []"""
+
+_SYNTHESIS_SYSTEM = """You are a compassionate AI health assistant for rural and underserved communities.
+You are NOT a doctor. You never make definitive diagnoses.
+Always recommend consulting a qualified dermatologist or healthcare professional.
+Explain findings in plain, empathetic language. Acknowledge uncertainty honestly."""
+
+_SYNTHESIS_TEMPLATE = """TRIAGE CONTEXT:
+  Domain       : {domain}
+  Urgency      : {triage_level}
+  Symptoms     : {symptoms}
+  Reasoning    : {reasoning}
+
+SPECIALIST ANALYSIS:
   Classification : {classification}
   Confidence     : {confidence}
   Risk level     : {risk_level}
-  Visual notes   : {visual_description}
   ABCDE notes    : {abcde_notes}
   Explanation    : {plain_explanation}
   Recommended    : {recommended_action}
 {rag_section}
-Write a compassionate, plain-language summary for the user (under 180 words).
-Emphasise that this is NOT a diagnosis and they MUST consult a dermatologist.
-Start with what was found, then what it might mean, then what to do next."""
+USER'S QUESTION: "{query}"
 
-# Question-like prefixes used for knowledge-query heuristic
+Instructions (follow all):
+- Write a compassionate, plain-language response in 3–5 sentences (under 200 words).
+- Lead with what was found and the urgency level.
+- If RELEVANT KNOWLEDGE CONTEXT is provided above, use it to add clinical grounding
+  (e.g. mention how conditions differ by skin tone, cite next-step timing).
+- Explain what the finding might mean in simple terms; avoid jargon.
+- State clearly what the person should do next (timing, who to contact).
+- End by emphasising this is NOT a diagnosis and they MUST consult a clinician.
+- If triage_level is 'urgent', state explicitly they should seek care today or within days."""
+
+# Question-like prefixes used by the heuristic triage.
 _QUESTION_STARTS = (
     "what", "how", "why", "when", "which", "who",
     "is ", "are ", "can ", "does ", "should ", "do ",
     "tell me", "explain", "describe", "what's",
 )
 
+# Keywords indicating dermatological concern.
+_DERM_KEYWORDS = frozenset({
+    "skin", "mole", "lesion", "rash", "melanoma", "nevus", "nevus", "spot",
+    "bump", "growth", "itch", "dermat", "freckle", "wart", "acne",
+    "psoriasis", "eczema", "blister", "sore", "patch", "blotch",
+    "discolor", "pigment", "lump", "crust", "scale", "seborrheic",
+    "keratosis", "carcinoma", "basal", "squamous", "vascular", "hemangioma",
+    "angioma", "tinea", "fungal", "scabies", "impetigo", "abscess", "cyst",
+})
+
+# Keywords elevating triage to urgent.
+_URGENT_KEYWORDS = frozenset({
+    "melanoma", "cancer", "bleed", "bleeding", "ulcer", "spreading",
+    "rapid", "rapidly", "emergency", "urgent", "severe", "growing fast",
+    "infected", "pus", "fever", "pain",
+})
+
 
 class Orchestrator:
     """
     Central coordinator for the RuralClinic AI system.
 
-    Manages Gemma 4 inference, multi-tool routing, worker dispatch,
-    response synthesis, and conversation history in a single stateful object.
+    Manages the two-phase triage-then-dispatch agentic workflow, Gemma 4
+    inference, worker coordination, response synthesis, and conversation
+    history in a single stateful object.
 
     Typical usage::
 
         orch = Orchestrator()
         result = orch.route_and_run("Is this mole dangerous?", image=pil_image)
         print(result["response"])
+        print(result["routing_decision"]["triage_level"])
     """
 
     def __init__(self, use_ollama: bool = True):
@@ -173,8 +227,11 @@ class Orchestrator:
         self, query: str, image: Optional[Image.Image] = None
     ) -> dict:
         """
-        Primary entry point: route a query + optional image through multi-tool
-        dispatch and return a synthesised plain-language response.
+        Primary entry point: run the two-phase agentic workflow.
+
+        Phase 1: _triage_query() → structured routing_decision JSON.
+        Phase 2: dispatch recommended workers → worker_result + rag_result.
+        Phase 3: synthesise → plain-language response with safety guardrails.
 
         Args:
             query: User's text question or symptom description.
@@ -182,47 +239,71 @@ class Orchestrator:
 
         Returns:
             dict with keys:
-              response        (str)        — Final synthesised answer.
-              worker_result   (dict|None)  — Raw output from DermatologyWorker.
-              rag_result      (dict|None)  — Raw output from RAGWorker.
-              function_calls  (list)       — Audit trail of all tool calls.
-              disclaimer      (str)        — Medical safety disclaimer.
-              timestamp       (str)        — UTC ISO-8601 timestamp.
-              error           (str)        — Present only if an exception occurred.
+              response          (str)        — Final synthesised answer.
+              routing_decision  (dict)       — Structured triage/routing JSON.
+              worker_result     (dict|None)  — DermatologyWorker output.
+              rag_result        (dict|None)  — RAGWorker output.
+              function_calls    (list)       — Audit trail of all tool calls.
+              disclaimer        (str)        — Medical safety disclaimer.
+              timestamp         (str)        — UTC ISO-8601 timestamp.
+              error             (str)        — Present only if an exception occurred.
         """
         timestamp = datetime.now(timezone.utc).isoformat()
         logger.info("route_and_run | has_image=%s | query=%.80s", image is not None, query)
         self.function_call_log.clear()
 
         try:
-            tool_calls = self._decide_tool_calls(query, image)
+            # ── Phase 1: Triage & Route ───────────────────────────────────
+            routing_decision = self._triage_query(query, image)
+            logger.info(
+                "Routing decision | domain=%s | triage=%s | workers=%s | source=%s",
+                routing_decision.get("domain"),
+                routing_decision.get("triage_level"),
+                routing_decision.get("recommended_workers"),
+                routing_decision.get("routing_source", "unknown"),
+            )
 
+            # ── Phase 2: Worker Dispatch ──────────────────────────────────
             worker_result: Optional[dict] = None
             rag_result: Optional[dict] = None
 
-            for tc in tool_calls:
-                name = tc["name"]
-                args = tc.get("arguments", {})
-
-                if name == "analyze_skin_lesion":
-                    symptoms = args.get("symptoms", query)
+            for worker_name in routing_decision.get("recommended_workers", []):
+                if worker_name == "analyze_skin_lesion":
+                    symptoms = " ".join(routing_decision.get("extracted_symptoms", []))
+                    symptoms = symptoms or query
                     worker_result = self.dermatology_worker.analyze(
                         image=image, symptoms=symptoms
                     )
-                    self._log_function_call(name, args, worker_result)
+                    self._log_function_call(
+                        "analyze_skin_lesion",
+                        {"symptoms": symptoms[:120]},
+                        worker_result,
+                    )
 
-                elif name == "retrieve_dermatology_knowledge":
-                    knowledge_query = args.get("query", query)
-                    rag_result = self.rag_worker.answer(knowledge_query)
-                    self._log_function_call(name, args, rag_result)
+                elif worker_name == "retrieve_dermatology_knowledge":
+                    rag_result = self.rag_worker.answer(
+                        query,
+                        domain_filter="dermatology"
+                        if routing_decision.get("domain") == "dermatology"
+                        else None,
+                    )
+                    self._log_function_call(
+                        "retrieve_dermatology_knowledge",
+                        {"query": query[:120]},
+                        rag_result,
+                    )
 
-            response = self._synthesise_response(query, worker_result, rag_result)
+            # ── Phase 3: Synthesis ────────────────────────────────────────
+            response = self._synthesise_response(
+                query, routing_decision, worker_result, rag_result
+            )
             response = enforce_safety(response)
 
             self._update_history(query, response)
 
             return {
                 "response": response,
+                "routing_decision": routing_decision,
                 "worker_result": worker_result,
                 "rag_result": rag_result,
                 "function_calls": list(self.function_call_log),
@@ -237,6 +318,14 @@ class Orchestrator:
                     "I encountered an error processing your request. "
                     "Please try again, or consult a healthcare professional directly."
                 ),
+                "routing_decision": {
+                    "domain": "unclear",
+                    "triage_level": "unclear",
+                    "extracted_symptoms": [],
+                    "recommended_workers": [],
+                    "reasoning": "Error during processing.",
+                    "routing_source": "error",
+                },
                 "worker_result": None,
                 "rag_result": None,
                 "function_calls": list(self.function_call_log),
@@ -245,117 +334,164 @@ class Orchestrator:
                 "error": str(exc),
             }
 
-    # ── Multi-tool routing ────────────────────────────────────────────────────
+    # ── Phase 1: Triage ───────────────────────────────────────────────────────
 
-    def _decide_tool_calls(
+    def _triage_query(
         self, query: str, image: Optional[Image.Image]
-    ) -> list[dict]:
+    ) -> dict:
         """
-        Determine which tools to call for this query + image combination.
+        Produce the Phase 1 structured routing decision.
 
-        Priority:
-          1. Image present → analyze_skin_lesion always.
-             Also add retrieve_dermatology_knowledge if query is question-like.
-          2. No image, Ollama available → let Gemma 4 decide (may return 0–2 tools).
-          3. No image, no Ollama → keyword/heuristic fallback.
+        For image inputs, uses a fast heuristic (always dermatology) to avoid
+        an extra Ollama round-trip for the triage call.
+        For text-only inputs, tries Gemma 4 native function calling first,
+        then falls back to keyword-based heuristic.
         """
+        # Fast path: image always means dermatology — skip LLM triage.
         if image is not None:
-            calls: list[dict] = [
-                {"name": "analyze_skin_lesion", "arguments": {"symptoms": query}}
-            ]
-            if self._is_knowledge_query(query):
-                calls.append(
-                    {"name": "retrieve_dermatology_knowledge", "arguments": {"query": query}}
-                )
-            return calls
+            return self._heuristic_triage(query, image)
 
         if self.use_ollama and self._client:
-            return self._ollama_tool_calls(query)
+            decision = self._ollama_triage(query)
+            if decision is not None:
+                return decision
 
-        return self._keyword_fallback(query)
+        return self._heuristic_triage(query, image)
 
-    def _ollama_tool_calls(self, query: str) -> list[dict]:
+    def _ollama_triage(self, query: str) -> Optional[dict]:
         """
-        Use Gemma 4 native function calling to select 0, 1, or 2 tools.
-        Falls back to keyword routing if Ollama raises an exception.
+        Ask Gemma 4 to produce a structured routing decision via ROUTING_TOOL.
+
+        Returns the parsed routing decision dict on success, or None if Gemma 4
+        does not return a tool call (falls back to heuristic caller).
         """
         try:
-            messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+            messages = [{"role": "system", "content": _TRIAGE_SYSTEM}]
             messages.extend(self.history[-MAX_HISTORY_LENGTH * 2:])
             messages.append({"role": "user", "content": query})
 
             response = self._client.chat(
                 model=MODEL_NAME,
                 messages=messages,
-                tools=TOOL_SCHEMAS,
-                options={"temperature": 0.1},
+                tools=ROUTING_SCHEMAS,
+                options={"temperature": 0.05},  # Low temp for consistent routing
             )
-            if hasattr(response, "message") and response.message.tool_calls:
-                calls = []
-                for tc in response.message.tool_calls:
-                    logger.info("Gemma 4 selected tool: %s", tc.function.name)
-                    calls.append({
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments or {},
-                    })
-                return calls
 
-            logger.info("Gemma 4 selected no tool — general response")
-            return []
+            if (
+                hasattr(response, "message")
+                and response.message.tool_calls
+                and response.message.tool_calls[0].function.name == "triage_and_route"
+            ):
+                tc = response.message.tool_calls[0]
+                args = dict(tc.function.arguments or {})
+                args["routing_source"] = "gemma4_function_call"
+                logger.info(
+                    "Gemma 4 triage | domain=%s | triage=%s | workers=%s",
+                    args.get("domain"),
+                    args.get("triage_level"),
+                    args.get("recommended_workers"),
+                )
+                return args
+
+            logger.info("Gemma 4 returned no triage tool call — heuristic fallback")
+            return None
 
         except Exception as exc:
-            logger.warning("Ollama tool decision failed (%s) — keyword fallback", exc)
-            return self._keyword_fallback(query)
+            logger.warning("Ollama triage failed (%s) — heuristic fallback", exc)
+            return None
 
-    def _keyword_fallback(self, query: str) -> list[dict]:
+    def _heuristic_triage(
+        self, query: str, image: Optional[Image.Image]
+    ) -> dict:
         """
-        Heuristic routing used when Ollama is unavailable.
-        Knowledge questions → RAG; symptom descriptions → analysis.
-        """
-        single = self._keyword_routing(query)
-        if single is None:
-            return []
-        # Override to RAG when the matched query is question-like
-        if self._is_knowledge_query(query):
-            return [{"name": "retrieve_dermatology_knowledge", "arguments": {"query": query}}]
-        return [single]
+        Keyword-based routing fallback producing the same schema as _ollama_triage.
 
-    # ── Legacy single-call routing (kept for backward compatibility) ──────────
+        Covers the four cases that arise in tests and offline deployments:
+          - Image present      → dermatology, analyze_skin_lesion
+          - Derm keyword + Q   → dermatology, retrieve_dermatology_knowledge
+          - Derm keyword       → dermatology, analyze_skin_lesion
+          - No derm keyword    → general, no workers
+        """
+        q = query.lower()
+        matched = [kw for kw in _DERM_KEYWORDS if kw in q]
+        is_derm = bool(matched) or image is not None
+        is_urgent = any(kw in q for kw in _URGENT_KEYWORDS)
+        is_question = self._is_knowledge_query(query)
+
+        # Build worker list
+        workers: list[str] = []
+        if image is not None:
+            workers.append("analyze_skin_lesion")
+        elif is_derm and not is_question:
+            workers.append("analyze_skin_lesion")
+        if is_derm and is_question:
+            workers.append("retrieve_dermatology_knowledge")
+
+        # Urgency is meaningful only for personal symptom queries, not educational
+        # questions — e.g. "What is melanoma?" should not be triaged as urgent.
+        symptom_urgent = is_urgent and not is_question
+        triage = (
+            "urgent" if symptom_urgent
+            else "moderate" if is_derm
+            else "low"
+        )
+
+        # Build human-readable reasoning for the UI routing panel.
+        reasoning_parts: list[str] = []
+        if image is not None:
+            reasoning_parts.append("Skin image attached — routed to visual analysis.")
+        if matched:
+            kw_sample = ", ".join(matched[:3])
+            reasoning_parts.append(f"Dermatology terms detected: {kw_sample}.")
+        if is_question and is_derm:
+            reasoning_parts.append(
+                "Query is informational — routed to knowledge retrieval."
+            )
+        if symptom_urgent:
+            reasoning_parts.append(
+                "Urgency indicator present in symptom description — triage level elevated."
+            )
+        if not reasoning_parts:
+            reasoning_parts.append(
+                "No dermatology indicators detected — general conversational response."
+            )
+
+        return {
+            "domain": "dermatology" if is_derm else "general",
+            "triage_level": triage,
+            "extracted_symptoms": matched[:5],
+            "recommended_workers": workers,
+            "reasoning": " ".join(reasoning_parts),
+            "routing_source": "heuristic",
+        }
+
+    # ── Legacy single-call routing (preserved for backward-compat tests) ──────
 
     def _keyword_routing(self, query: str) -> Optional[dict]:
         """
-        Lightweight keyword-based routing to analyze_skin_lesion.
-        Returns a single tool-call dict, or None for unrelated queries.
-
-        Note: _decide_tool_calls() wraps this and may reroute to RAG for
-        question-like queries. Direct callers (e.g. tests) see the raw result.
+        Lightweight keyword check returning a single tool-call dict or None.
+        Called directly by existing tests; not used in the main routing path.
         """
-        derm_keywords = {
-            "skin", "mole", "lesion", "rash", "melanoma", "nevus", "spot",
-            "bump", "growth", "itch", "dermat", "freckle", "wart", "acne",
-            "psoriasis", "eczema", "blister", "sore", "patch", "blotch",
-            "discolor", "pigment", "lump", "crust", "scale",
-        }
-        if any(kw in query.lower() for kw in derm_keywords):
+        if any(kw in query.lower() for kw in _DERM_KEYWORDS):
             logger.info("Keyword routing → analyze_skin_lesion")
             return {"name": "analyze_skin_lesion", "arguments": {"symptoms": query}}
         return None
 
-    # ── Response synthesis ────────────────────────────────────────────────────
+    # ── Phase 3: Synthesis ────────────────────────────────────────────────────
 
     def _synthesise_response(
         self,
         query: str,
+        routing_decision: dict,
         worker_result: Optional[dict],
         rag_result: Optional[dict] = None,
     ) -> str:
         """
-        Produce a plain-language response from one or both worker outputs.
+        Produce a plain-language response from worker results and triage context.
 
-        - No workers called → general conversational response.
-        - RAG only → use RAG answer directly.
-        - Analysis (± RAG) → Gemma 4 synthesises from structured result,
-          optionally enriched with retrieved knowledge context.
+        - No workers → general conversational response.
+        - RAG only   → return RAG answer (already safety-enforced).
+        - Analysis (± RAG) → Gemma 4 synthesis using structured template.
         """
         if worker_result is None and rag_result is None:
             return self._general_response(query)
@@ -363,23 +499,42 @@ class Orchestrator:
         if worker_result is None and rag_result is not None:
             return rag_result.get("answer", "")
 
-        # worker_result present — build synthesis prompt
+        # Build RAG context section for the synthesis prompt.
+        #
+        # Priority 1: an explicit RAGWorker answer (Gemma 4-synthesised knowledge)
+        #   → pass the full answer so the synthesis LLM can quote or paraphrase it.
+        # Priority 2: auto-retrieval via get_context_for_synthesis() (TF-IDF only,
+        #   no extra LLM call — safe on CPU-only hardware).  Use up to 500 chars so
+        #   Gemma 4 has enough context to ground its response without token bloat.
         rag_section = ""
         if rag_result and rag_result.get("answer"):
             rag_section = (
-                f"\nAdditional knowledge context:\n  {rag_result['answer']}\n"
+                "\nRELEVANT KNOWLEDGE CONTEXT (RAG-synthesised):\n"
+                + rag_result["answer"]
+                + "\n"
             )
+        elif worker_result:
+            brief_ctx = self.rag_worker.get_context_for_synthesis(query, top_k=2)
+            if brief_ctx:
+                rag_section = (
+                    "\nRELEVANT KNOWLEDGE CONTEXT (auto-retrieved from guidelines KB):\n"
+                    + brief_ctx[:500]
+                    + "\n"
+                )
 
-        prompt = _SYNTHESIS_PROMPT_TEMPLATE.format(
-            query=query,
+        prompt = _SYNTHESIS_TEMPLATE.format(
+            domain=routing_decision.get("domain", "unknown"),
+            triage_level=routing_decision.get("triage_level", "unknown"),
+            symptoms=", ".join(routing_decision.get("extracted_symptoms", [])) or "none extracted",
+            reasoning=routing_decision.get("reasoning", ""),
             classification=worker_result.get("classification", "unknown"),
             confidence=worker_result.get("confidence", "unknown"),
             risk_level=worker_result.get("risk_level", "unknown"),
-            visual_description=worker_result.get("visual_description", "N/A"),
             abcde_notes=worker_result.get("abcde_notes", "N/A"),
             plain_explanation=worker_result.get("plain_explanation", "N/A"),
             recommended_action=worker_result.get("recommended_action", "N/A"),
             rag_section=rag_section,
+            query=query,
         )
 
         if self.use_ollama and self._client:
@@ -387,7 +542,7 @@ class Orchestrator:
                 resp = self._client.chat(
                     model=MODEL_NAME,
                     messages=[
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": _SYNTHESIS_SYSTEM},
                         {"role": "user", "content": prompt},
                     ],
                     options={"temperature": 0.3},
@@ -396,12 +551,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.warning("Ollama synthesis failed (%s) — template", exc)
 
-        return self._template_synthesis(worker_result)
+        return self._template_synthesis(worker_result, routing_decision)
 
     def _general_response(self, query: str) -> str:
         if self.use_ollama and self._client:
             try:
-                messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+                messages = [{"role": "system", "content": _SYNTHESIS_SYSTEM}]
                 messages.extend(self.history[-MAX_HISTORY_LENGTH * 2:])
                 messages.append({"role": "user", "content": query})
                 resp = self._client.chat(
@@ -420,30 +575,36 @@ class Orchestrator:
             "for medical concerns."
         )
 
-    def _template_synthesis(self, result: dict) -> str:
+    def _template_synthesis(self, result: dict, routing_decision: dict) -> str:
         cls = result.get("classification", "unclassified").replace("_", " ").title()
         conf = result.get("confidence", "unknown")
         risk = result.get("risk_level", "unknown")
         explanation = result.get("plain_explanation", "No explanation available.")
         action = result.get("recommended_action", "Please consult a dermatologist.")
-        visual = result.get("visual_description", "")
+        triage = routing_decision.get("triage_level", "unknown")
+
+        urgency_note = (
+            "⚠️ Triage level is URGENT — please seek professional evaluation today "
+            "or within the next few days.\n\n"
+            if triage == "urgent"
+            else ""
+        )
 
         parts = [
+            urgency_note,
             f"The image analysis suggests: **{cls}** "
             f"(confidence: {conf}, risk level: {risk}).",
             "",
             explanation,
+            "",
+            f"Recommended next step: {action}",
         ]
-        if visual:
-            parts += ["", f"Visual observations: {visual}"]
-        parts += ["", f"Recommended next step: {action}"]
         return "\n".join(parts)
 
     # ── Utilities ─────────────────────────────────────────────────────────────
 
     @staticmethod
     def _is_knowledge_query(text: str) -> bool:
-        """Heuristic: does this text look like an informational question?"""
         q = text.lower().strip()
         return q.endswith("?") or any(q.startswith(s) for s in _QUESTION_STARTS)
 

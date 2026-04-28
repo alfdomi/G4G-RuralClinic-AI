@@ -1,17 +1,105 @@
 """
 Tool schemas for Gemma 4 native function calling.
 
-These JSON schemas define the tools available to the orchestrator.
-Gemma 4 (via Ollama) reads these at inference time and decides which
-tool to invoke based on the user's query and attached image.
+Three schemas are defined:
+  ROUTING_TOOL     — triage_and_route: Phase 1 routing only.
+                     Gemma 4 uses this to produce a structured JSON routing
+                     decision (domain, triage_level, extracted_symptoms,
+                     recommended_workers, reasoning) before any worker is called.
+  DERMATOLOGY_TOOL — analyze_skin_lesion: Phase 2 image analysis worker.
+  RAG_TOOL         — retrieve_dermatology_knowledge: Phase 2 knowledge Q&A.
 
-Schema format follows the OpenAI-compatible tool spec supported by Ollama,
-which Gemma 4 uses for structured function-call outputs.
+Schemas follow the OpenAI-compatible tool spec supported by Ollama, which
+Gemma 4 uses for structured function-call outputs.
 
 Project: G4G RuralClinic AI — offline dermatology assistant.
 """
 
-# ─── Dermatology Analysis Tool ────────────────────────────────────────────────
+# ─── Phase 1: Routing / Triage Tool ──────────────────────────────────────────
+# Used exclusively by the orchestrator's _triage_query() phase.
+# Gemma 4 returns one call to this tool containing the routing decision JSON.
+ROUTING_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "triage_and_route",
+        "description": (
+            "Analyse the user's query and any attached image to produce a structured "
+            "triage and routing decision. Call this tool for EVERY user message. "
+            "Determine the clinical domain, urgency level, key symptoms mentioned, "
+            "and which specialist workers should be invoked next. "
+            "Use your reasoning capability (<|think|> mode when available) to justify "
+            "the routing decision before producing the JSON output."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "enum": ["dermatology", "general", "unclear"],
+                    "description": (
+                        "Clinical domain of the query. "
+                        "'dermatology' if the user mentions skin, moles, lesions, rashes, "
+                        "or provides a skin image. 'general' for unrelated health or "
+                        "non-health questions. 'unclear' when ambiguous."
+                    ),
+                },
+                "triage_level": {
+                    "type": "string",
+                    "enum": ["urgent", "moderate", "low", "unclear"],
+                    "description": (
+                        "'urgent': features suggesting melanoma, rapidly growing lesion, "
+                        "bleeding, immunocompromised patient, or systemic alarm signs. "
+                        "'moderate': chronic or changing but not immediately alarming. "
+                        "'low': stable, likely benign, or educational question. "
+                        "'unclear': insufficient information."
+                    ),
+                },
+                "extracted_symptoms": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "List of specific symptoms or visual features mentioned by the user "
+                        "or visible in the image. E.g. ['itchy', 'dark mole', 'irregular border', "
+                        "'bleeding', 'growing for 3 months']. Empty list if none mentioned."
+                    ),
+                },
+                "recommended_workers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["analyze_skin_lesion", "retrieve_dermatology_knowledge"],
+                    },
+                    "description": (
+                        "Ordered list of worker tools to invoke. "
+                        "Use 'analyze_skin_lesion' when an image is provided or "
+                        "the user describes personal skin symptoms. "
+                        "Use 'retrieve_dermatology_knowledge' when the user asks a "
+                        "knowledge question ('What is...?', 'How do I...?', etc.). "
+                        "Both can be listed for image queries with an educational question. "
+                        "Empty list for general non-dermatology queries."
+                    ),
+                },
+                "reasoning": {
+                    "type": "string",
+                    "description": (
+                        "Brief explanation of the routing decision (1–2 sentences). "
+                        "Reference specific ABCDE features, keywords, or image properties "
+                        "that informed the domain and triage level choices."
+                    ),
+                },
+            },
+            "required": [
+                "domain",
+                "triage_level",
+                "extracted_symptoms",
+                "recommended_workers",
+                "reasoning",
+            ],
+        },
+    },
+}
+
+# ─── Phase 2: Dermatology Analysis Tool ───────────────────────────────────────
 DERMATOLOGY_TOOL = {
     "type": "function",
     "function": {
@@ -41,16 +129,13 @@ DERMATOLOGY_TOOL = {
                 "image_location": {
                     "type": "string",
                     "description": (
-                        "Optional: Body location of the skin lesion as described by the user. "
-                        "Examples: 'left forearm', 'upper back', 'face near nose'. "
-                        "Helps contextualise the analysis."
+                        "Optional: Body location of the skin lesion as described by the user."
                     ),
                 },
                 "duration": {
                     "type": "string",
                     "description": (
-                        "Optional: How long the skin issue has been present. "
-                        "Examples: '2 weeks', 'since childhood', 'appeared last month'."
+                        "Optional: How long the skin issue has been present."
                     ),
                 },
             },
@@ -59,7 +144,7 @@ DERMATOLOGY_TOOL = {
     },
 }
 
-# ─── RAG Knowledge Retrieval Tool ─────────────────────────────────────────────
+# ─── Phase 2: RAG Knowledge Retrieval Tool ────────────────────────────────────
 RAG_TOOL = {
     "type": "function",
     "function": {
@@ -70,7 +155,9 @@ RAG_TOOL = {
             "Use this tool when the user asks a knowledge or information question — "
             "e.g. 'What is melanoma?', 'How do I check a mole?', 'What causes psoriasis?', "
             "'When should I see a dermatologist?'. "
-            "Returns relevant excerpts from an offline dermatology knowledge base. "
+            "Returns relevant excerpts from an offline dermatology knowledge base that "
+            "covers ABCDE criteria, skin-of-color presentations, Fitzpatrick types, "
+            "rural/tropical conditions, and WHO referral guidelines. "
             "Does NOT require or analyse an image."
         ),
         "parameters": {
@@ -79,9 +166,7 @@ RAG_TOOL = {
                 "query": {
                     "type": "string",
                     "description": (
-                        "The user's question or topic to look up. "
-                        "Examples: 'What is the ABCDE rule?', 'basal cell carcinoma treatment', "
-                        "'how to do a skin self-exam'."
+                        "The user's question or topic to look up in the knowledge base."
                     ),
                 },
                 "condition": {
@@ -97,6 +182,13 @@ RAG_TOOL = {
     },
 }
 
-# ─── Tool Registry ────────────────────────────────────────────────────────────
+# ─── Registries ───────────────────────────────────────────────────────────────
+# ROUTING_SCHEMAS: used in Phase 1 (triage call) — only the routing tool.
+ROUTING_SCHEMAS: list[dict] = [ROUTING_TOOL]
+
+# WORKER_SCHEMAS: used in Phase 2 (worker dispatch descriptions for Gemma 4).
+WORKER_SCHEMAS: list[dict] = [DERMATOLOGY_TOOL, RAG_TOOL]
+
+# TOOL_SCHEMAS: full list exposed for backward compatibility.
 TOOL_SCHEMAS: list[dict] = [DERMATOLOGY_TOOL, RAG_TOOL]
 TOOL_NAMES: set[str] = {t["function"]["name"] for t in TOOL_SCHEMAS}

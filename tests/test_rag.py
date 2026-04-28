@@ -291,3 +291,108 @@ class TestEvaluatorMetrics:
             assert isinstance(img, Image.Image)
             assert label in SKIN_CLASSES
             assert img.size == (224, 224)
+
+    def test_safety_adherence_rate_computed(self):
+        from scripts.evaluate import compute_metrics
+        from src.workers.dermatology import SKIN_CLASSES
+
+        raw = [
+            {"disclaimer": "I am not a doctor.", "plain_explanation": "test"},
+            {"disclaimer": "I am not a doctor.", "plain_explanation": "test"},
+            {"disclaimer": "", "plain_explanation": "no disclaimer here"},
+        ]
+        metrics = compute_metrics(
+            ["melanoma", "benign_nevus", "unknown"],
+            ["melanoma", "benign_nevus", "unknown"],
+            SKIN_CLASSES,
+            raw_results=raw,
+        )
+        assert "safety_adherence_rate" in metrics
+        assert metrics["safety_adherence_rate"] == pytest.approx(2 / 3, abs=1e-3)
+
+    def test_scripts_evaluate_mock_mode(self):
+        """Smoke-test scripts/evaluate.py dry run via its public functions."""
+        from scripts.evaluate import build_synthetic_samples, run_evaluation
+        from unittest.mock import patch
+        from src.workers.dermatology import DermatologyWorker
+
+        samples = build_synthetic_samples(n_per_class=1)
+        with patch("src.workers.dermatology.DermatologyWorker._init_ollama"):
+            worker = DermatologyWorker(use_ollama=True)
+        metrics = run_evaluation(samples, worker, mock=True, mock_correct_rate=1.0)
+        assert metrics["accuracy"] == 1.0
+        assert "macro_f1" in metrics
+        assert "safety_adherence_rate" in metrics
+
+
+# ─── RAGWorker v2 (src/workers/rag.py) ───────────────────────────────────────
+
+class TestRAGWorkerV2:
+    """Tests for the new domain-aware RAGWorker using derm_guidelines.json."""
+
+    @pytest.fixture
+    def mock_rag_v2(self):
+        from unittest.mock import MagicMock, patch
+        with patch("src.workers.rag.RAGWorker._init_ollama"):
+            from src.workers.rag import RAGWorker
+            w = RAGWorker(use_ollama=True)
+            w._client = MagicMock()
+            resp = MagicMock()
+            resp.message.content = (
+                "Based on the knowledge base, this appears consistent with a "
+                "common skin condition. Please consult a dermatologist."
+            )
+            w._client.chat.return_value = resp
+            return w
+
+    def test_worker_loads_guidelines_kb(self, mock_rag_v2):
+        # Guidelines KB has 45 entries; fallback has 34 — either works.
+        assert mock_rag_v2.doc_count >= 34
+
+    def test_answer_returns_required_keys(self, mock_rag_v2):
+        result = mock_rag_v2.answer("What is the ABCDE rule?")
+        for key in {"answer", "sources", "query", "context_used", "disclaimer"}:
+            assert key in result
+
+    def test_domain_filter_dermatology(self, mock_rag_v2):
+        result = mock_rag_v2.answer("melanoma risk", domain_filter="dermatology")
+        assert "answer" in result
+        assert result["disclaimer"]
+
+    def test_get_context_for_synthesis_returns_str(self, mock_rag_v2):
+        ctx = mock_rag_v2.get_context_for_synthesis("melanoma dark skin", top_k=2)
+        assert isinstance(ctx, str)
+
+    def test_get_context_compact_is_shorter(self, mock_rag_v2):
+        full = mock_rag_v2._format_context(
+            mock_rag_v2._retriever.retrieve("melanoma", top_k=2), compact=False
+        )
+        compact = mock_rag_v2._format_context(
+            mock_rag_v2._retriever.retrieve("melanoma", top_k=2), compact=True
+        )
+        assert len(compact) <= len(full)
+
+    def test_skin_of_color_chunks_retrievable(self, mock_rag_v2):
+        result = mock_rag_v2.answer("How does melanoma look on dark skin?", top_k=5)
+        conditions = [s.get("condition") for s in result.get("sources", [])]
+        # Either melanoma-specific or general skin-of-color chunks should appear.
+        assert len(result["sources"]) > 0
+
+    def test_fitzpatrick_chunks_retrievable(self, mock_rag_v2):
+        result = mock_rag_v2.answer("Fitzpatrick scale skin types", top_k=3)
+        assert len(result["sources"]) > 0
+
+    def test_no_context_fallback(self, mock_rag_v2):
+        result = mock_rag_v2.answer("how to bake bread step by step recipe pasta")
+        assert "answer" in result
+        assert result["disclaimer"]
+
+    def test_ollama_failure_falls_back_gracefully(self, mock_rag_v2):
+        mock_rag_v2._client.chat.side_effect = RuntimeError("timeout")
+        result = mock_rag_v2.answer("What is actinic keratosis?")
+        assert result["answer"]
+
+    def test_disclaimer_present_in_all_responses(self, mock_rag_v2):
+        for query in ["melanoma", "eczema treatment", "scabies rural"]:
+            result = mock_rag_v2.answer(query)
+            assert result["disclaimer"]

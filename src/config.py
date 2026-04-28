@@ -60,3 +60,7 @@ MAX_HISTORY_LENGTH: int = 10   # Max user/assistant turns retained in memory
 # ─── RAG (Retrieval-Augmented Generation) ─────────────────────────────────────
 RAG_TOP_K: int = 3             # Knowledge chunks returned per query
 RAG_KNOWLEDGE_BASE_PATH = ROOT_DIR / "src" / "rag" / "knowledge_base.json"
+
+# Comprehensive guidelines KB: 45 chunks covering ABCDE, all skin classes,
+# skin-of-color, Fitzpatrick types, rural/tropical conditions, WHO referral.
+DERM_GUIDELINES_PATH = ROOT_DIR / "data" / "knowledge" / "derm_guidelines.json"
