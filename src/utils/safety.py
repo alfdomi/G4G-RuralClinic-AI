@@ -6,6 +6,8 @@ to users. Core rules:
   1. Soften overconfident diagnostic language.
   2. Always append the medical disclaimer.
   3. Validate that required safety fields are present in structured outputs.
+  4. Enhance compassion and accessibility for low-health-literacy users.
+  5. Add clear referral timing guidance.
 
 Project: G4G RuralClinic AI — offline dermatology assistant.
 These guardrails are non-negotiable; removing them would make the system
@@ -35,6 +37,51 @@ _OVERCONFIDENT_REPLACEMENTS = [
     (r"\b100%\s+(?:sure|certain)\b",    "with some confidence"),
     (r"\bno doubt\b",                   "possibly"),
     (r"\bwithout question\b",           "likely"),
+    (r"\bis cancer\b",                  "might be a serious condition that needs checking"),
+    (r"\bmelanoma\b",                   "a type of skin cancer (melanoma)"),
+    (r"\bcarcinoma\b",                  "a type of skin cancer (carcinoma)"),
+    (r"\byou need surgery\b",           "surgery might be an option to discuss with your doctor"),
+    (r"\byou should\s+(not )?see a doctor\b", r"it is important to speak with a healthcare professional"),
+    (r"\bdefinitely (?:cancer|melanoma|carcinoma)\b", 
+     "possible serious condition that needs professional evaluation"),
+    (r"\bthis (?:is|looks like) (?:a )?tumor\b", "this shows a growth that needs evaluation"),
+    (r"\bit's (?:cancer|melanoma)\b",   "it could be a serious condition"),
+    (r"\bthe (?:lesion|mole) (?:is )?(?:cancer|melanoma)\b", 
+     "the growth may indicate a serious condition"),
+    (r"\byou must\b",                    "consider discussing with your clinician"),
+    (r"\byou require\b",                 "you may want to discuss with your clinician"),
+    (r"\bemergency\b",                   "situation needing prompt attention"),
+]
+
+# Patterns for adding compassionate / low-literacy softening
+_COMPASSIONATE_REPLACEMENTS = [
+    (r"\bthe worst\b",                   "a very serious"),
+    (r"\bhorrible\b",                    "concerning"),
+    (r"\bterrible\b",                    "concerning"),
+    (r"\bdangerous\b",                   "needing prompt attention"),
+    (r"\bscary\b",                       "worrying"),
+    (r"\balarming\b",                    "concerning"),
+    (r"\bterrible and scary\b",          "concerning"),
+    (r"\bconcerning and worrying\b",     "concerning"),
+]
+
+# Referral timing guidance — soften urgency but maintain clarity
+_REFERRAL_REPLACEMENTS = [
+    (r"\bgo to the (?:emergency|ER)\b",  "seek medical care right away"),
+    (r"\bER\b",                           "emergency department"),
+    (r"\bsee a doctor today\b",          "speak with a healthcare professional soon"),
+    (r"\bimmediately\b",                 "right away"),
+    (r"\bas soon as possible\b",         "when you can"),
+    (r"\bright away right away\b",       "right away"),
+]
+
+# Combined replacements applied in sequence
+_ALL_REPLACEMENTS = _OVERCONFIDENT_REPLACEMENTS + _COMPASSIONATE_REPLACEMENTS + _REFERRAL_REPLACEMENTS
+
+# Post-processing: clean up duplicate/repeated words that may result from multiple replacements
+_CLEANUP_REPLACEMENTS = [
+    (r"\b(right away)( right away)\b", r"\1"),
+    (r"\b(seek medical care right away today)\b", "seek medical care right away"),
 ]
 
 
@@ -42,7 +89,9 @@ def enforce_safety(text: str) -> str:
     """
     Apply all safety rules to a text string:
       1. Replace overconfident diagnostic language with hedged alternatives.
-      2. Append the standard disclaimer if not already present.
+      2. Add compassionate wording for low-health-literacy users.
+      3. Soften referral timing while maintaining clarity.
+      4. Append the standard disclaimer if not already present.
 
     Args:
         text: Raw model or worker output string.
@@ -60,10 +109,21 @@ def enforce_safety(text: str) -> str:
 
     return text
 
+    text = _soften_language(text)
+
+    if _DISCLAIMER_MARKER not in text:
+        text = f"{text}\n\n{SAFETY_DISCLAIMER}"
+
+    return text
+
 
 def _soften_language(text: str) -> str:
     """Replace overconfident diagnostic phrases with appropriately hedged ones."""
-    for pattern, replacement in _OVERCONFIDENT_REPLACEMENTS:
+    # Apply all three categories: overconfident, compassionate, referral
+    for pattern, replacement in _ALL_REPLACEMENTS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    # Apply cleanup fixes
+    for pattern, replacement in _CLEANUP_REPLACEMENTS:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
@@ -90,6 +150,7 @@ def format_for_display(result: dict) -> str:
     """
     Convert a structured worker result dict into a clean, user-facing
     markdown string suitable for display in the Gradio UI.
+    Uses plain, compassionate language accessible to users with low health literacy.
 
     Args:
         result: Validated dict from DermatologyWorker.analyze().
@@ -103,28 +164,29 @@ def format_for_display(result: dict) -> str:
     confidence = result.get("confidence", "unknown")
     risk = result.get("risk_level", "unknown")
 
-    lines.append(f"**Classification:** {classification.replace('_', ' ').title()}")
-    lines.append(f"**Confidence:** {confidence.title()}")
-    lines.append(f"**Risk Level:** {risk.title()}")
+    # Format labels clearly and accessibly
+    lines.append(f"**What was found:** {classification.replace('_', ' ').title()}")
+    lines.append(f"**Confidence level:** {confidence.title()}")
+    lines.append(f"**Risk level:** {risk.title()}")
     lines.append("")
 
     if result.get("visual_description"):
-        lines.append(f"**Visual Observations:**")
+        lines.append(f"**What it looks like:**")
         lines.append(result["visual_description"])
         lines.append("")
 
     if result.get("abcde_notes"):
-        lines.append(f"**ABCDE Assessment:**")
+        lines.append(f"**ABCDE assessment details:**")
         lines.append(result["abcde_notes"])
         lines.append("")
 
     if result.get("plain_explanation"):
-        lines.append(f"**What This Means:**")
+        lines.append(f"**What this means for you:**")
         lines.append(result["plain_explanation"])
         lines.append("")
 
     if result.get("recommended_action"):
-        lines.append(f"**Recommended Action:**")
+        lines.append(f"**Suggested next step:**")
         lines.append(result["recommended_action"])
         lines.append("")
 

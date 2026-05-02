@@ -45,11 +45,13 @@ from PIL import Image
 
 from src.config import (
     MAX_HISTORY_LENGTH,
-    MODEL_NAME,
+    USE_QUANTIZED,
+    QUANTIZED_MODEL_NAME,
+    EFFECTIVE_MODEL_NAME,
+    HF_MODEL_NAME,
     OFFLINE_MODE,
     OLLAMA_HOST,
     SAFETY_DISCLAIMER,
-    HF_MODEL_NAME,
 )
 from src.tools import ROUTING_SCHEMAS, TOOL_SCHEMAS
 from src.utils.safety import enforce_safety
@@ -371,7 +373,7 @@ class Orchestrator:
             messages.append({"role": "user", "content": query})
 
             response = self._client.chat(
-                model=MODEL_NAME,
+                model=EFFECTIVE_MODEL_NAME,
                 messages=messages,
                 tools=ROUTING_SCHEMAS,
                 options={"temperature": 0.05},  # Low temp for consistent routing
@@ -540,7 +542,7 @@ class Orchestrator:
         if self.use_ollama and self._client:
             try:
                 resp = self._client.chat(
-                    model=MODEL_NAME,
+                    model=EFFECTIVE_MODEL_NAME,
                     messages=[
                         {"role": "system", "content": _SYNTHESIS_SYSTEM},
                         {"role": "user", "content": prompt},
@@ -560,7 +562,7 @@ class Orchestrator:
                 messages.extend(self.history[-MAX_HISTORY_LENGTH * 2:])
                 messages.append({"role": "user", "content": query})
                 resp = self._client.chat(
-                    model=MODEL_NAME,
+                    model=EFFECTIVE_MODEL_NAME,
                     messages=messages,
                     options={"temperature": 0.4},
                 )

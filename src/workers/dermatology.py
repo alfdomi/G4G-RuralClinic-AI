@@ -28,7 +28,7 @@ from src.config import (
     HF_MODEL_NAME,
     IMAGE_SIZE,
     MAX_IMAGE_SIZE_MB,
-    MODEL_NAME,
+    EFFECTIVE_MODEL_NAME,
     OFFLINE_MODE,
     OLLAMA_HOST,
     SAFETY_DISCLAIMER,
@@ -292,7 +292,7 @@ class DermatologyWorker:
         """Run multimodal inference via the local Ollama server."""
         image_b64 = self._image_to_base64(image)
         response = self._client.chat(
-            model=MODEL_NAME,
+            model=EFFECTIVE_MODEL_NAME,
             messages=[
                 {
                     "role": "user",

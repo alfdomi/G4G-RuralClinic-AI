@@ -1,0 +1,153 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# Docker Compose configuration for G4G RuralClinic AI
+#
+# This configuration splits the application into two services:
+#   1. ollama   — Runs the Ollama LLM server (CPU-only)
+#   2. app      — Runs the Python/Gradio web interface
+#
+# Why split?
+#   - Separation of concerns (model serving vs. UI)
+#   - Easier to scale or replace components independently
+#   - Clearer resource limits per service
+#
+# Features:
+#   - CPU-only inference (no GPU required)
+#   - Persistent volumes for models and data
+#   - Configurable quantized model via .env
+#   - Resource constraints for low-end hardware testing
+#
+# Quick start:
+#   1. docker compose up --build -d ollama
+#   2. docker compose up --build -d app
+#   3. Open http://localhost:7860
+#
+# Stop:
+#   docker compose down -v
+#
+# Rebuild after changes:
+#   docker compose up --build --force-recreate
+#
+# ────────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Ollama model serving. Exposes port 11434 for internal app communication.
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Pass the quantized model to use (can be overridden via .env)
+      args:
+        QUANTIZED_MODEL: ${QUANTIZED_MODEL:-gemma4:e4b-q4_K_M}
+        SKIP_MODEL_PULL: "false"
+    image: rural-clinic-ai:ollama
+    container_name: rural-clinic-ollama
+    restart: unless-stopped
+    command: server
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OFFLINE_MODE=true
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "11434:11434"           # Host:Container — for local debugging if needed
+    volumes:
+      # Persist Ollama model cache between container restarts
+      - ollama_data:/root/.ollama
+      # Share data directory for sample images, knowledge base, logs
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw
+    # Resource limits tuned for low-end hardware (typical laptop: 8 GB RAM)
+    # Adjust these values in .env if you have more resources available.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"           # Cap at 2 CPU cores
+          memory: 4G             # Max 4 GB RAM for Ollama
+        reservations:
+          cpus: "0.5"            # Guaranteed minimum
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - rural-clinic-net
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Gradio/web UI application.
+  # Connects to Ollama service via internal Docker network.
+  # ──────────────────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        QUANTIZED_MODEL: ${QUANTIZED_MODEL:-gemma4:e4b-q4_K_M}
+        SKIP_MODEL_PULL: "true"   # Skip model pull; use ollama service for this
+    image: rural-clinic-ai:app
+    container_name: rural-clinic-app
+    restart: unless-stopped
+    command: app
+    environment:
+      # Point to the ollama service by container name (Docker DNS resolves it)
+      - OLLAMA_HOST=http://ollama:11434
+      - OFFLINE_MODE=true
+      - USE_QUANTIZED=true
+      - QUANTIZED_MODEL_NAME=${QUANTIZED_MODEL:-gemma4:e4b-q4_K_M}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    ports:
+      - "7860:7860"               # Gradio UI
+    volumes:
+      - ./data:/app/data:rw        # Shared data (sample images, etc.)
+      - ./logs:/app/logs:rw        # Shared logs
+      # Optional: persist Gradio temp uploads (not strictly necessary)
+      - gradio_data:/tmp/gradio
+    depends_on:
+      ollama:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"             # Python app needs less CPU
+          memory: 3G               # ~2–3 GB typical for UI + inference
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - rural-clinic-net
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Optional stress/testing container for simulating low-end hardware.
+  # Usage: docker compose run --rm stress --timeout 60 --cpu 2 --vm 1 --vm-bytes 512M
+  # ──────────────────────────────────────────────────────────────────────────
+  stress:
+    image: polinux/stress
+    container_name: rural-clinic-stress
+    profiles: ["stress"]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    networks:
+      - rural-clinic-net
+    depends_on:
+      - ollama
+      - app
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volumes: persist model weights and user data across container lifecycle
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  ollama_data:
+    name: rural-clinic-ollama-data
+  gradio_data:
+    name: rural-clinic-gradio-data
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Network: isolate services on private bridge network
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  rural-clinic-net:
+    name: rural-clinic-network
+    driver: bridge
