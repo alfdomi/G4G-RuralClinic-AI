@@ -1,0 +1,87 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# .dockerignore for G4G RuralClinic AI
+#
+# Excludes unnecessary files from the Docker build context to keep
+# the build fast and the final image small.
+# ────────────────────────────────────────────────────────────────────────────────
+
+# Version control
+.git
+.gitignore
+
+# Python cache and bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv
+venv
+env
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Testing artifacts
+.pytest_cache
+.coverage
+htmlcov/
+.tox
+.nox
+
+# Logs (generated at runtime, not needed in image)
+logs/
+*.log
+
+# Large files / models (pulled at runtime via Ollama or mounted as volumes)
+*.bin
+*.gguf
+*.safetensors
+*.pt
+*.pth
+*.onnx
+models/
+
+# Documentation and meta-files (not needed in runtime image)
+README.md
+CHANGELOG.md
+LICENSE
+docs/
+*.md
+
+# CI/CD configuration
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+Jenkinsfile
+
+# Docker files (not needed inside the image)
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+.env
+.env.example
+
+# OS-specific
+.DS_Store
+Desktop.ini
+
+# Sample data (optional — include only if needed for testing)
+# Uncomment the next line to exclude sample data from the image:
+# data/samples/
+
+# Scripts used only during build/setup (not needed at runtime)
+# Uncomment to exclude:
+# scripts/download_sample_data.sh
